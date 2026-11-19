@@ -475,9 +475,9 @@ private func drawWave(_ context: GraphicsContext, track: LoadedTrack, start: Dou
     let secondsPerPoint = span / Double(size.width)
     let bins = max(1, Int((Double(columnPoints) * secondsPerPoint * rate).rounded()))
     let columnSeconds = Double(bins) / rate
-    let columnWidth = CGFloat(columnSeconds / secondsPerPoint)
     let first = max(0, Int((start / columnSeconds).rounded(.down)))
     let last = Int(((start + span) / columnSeconds).rounded(.up))
+    let scale = max(context.environment.displayScale, 1)
     let mid = top + height / 2
     let half = height / 2 - 1
     var outerPlayed = Path(), innerPlayed = Path(), outerAhead = Path(), innerAhead = Path()
@@ -489,8 +489,13 @@ private func drawWave(_ context: GraphicsContext, track: LoadedTrack, start: Dou
         for b in b0..<b1 { peak = max(peak, peaks[b]); loud += rms[b] }
         loud /= Float(b1 - b0)          // average loudness: the body, not the spikes
         let t = Double(column) * columnSeconds
-        let x = CGFloat((t - start) / secondsPerPoint)
-        let w = max(columnWidth - (columnWidth > 2 ? 0.6 : 0), 0.8)
+        // Whole device pixels, so every bar renders alike (fractional edges
+        // make a diagonal moiré across the waveform).
+        let px = (CGFloat((t - start) / secondsPerPoint) * scale).rounded()
+        let pxEnd = (CGFloat((t + columnSeconds - start) / secondsPerPoint) * scale).rounded()
+        let gap: CGFloat = pxEnd - px >= 3 ? 1 : 0
+        let x = px / scale
+        let w = max(pxEnd - px - gap, 1) / scale
         let hp = max(0.5, CGFloat(peak) * half)
         let hr = max(0.5, CGFloat(min(loud, peak)) * half)
         let outer = CGRect(x: x, y: mid - hp, width: w, height: hp * 2)

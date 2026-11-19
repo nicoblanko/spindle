@@ -74,6 +74,26 @@ struct WaveformLane: View {
             context.fill(grid, with: .color(Theme.line))
             context.fill(bars, with: .color(Theme.line.opacity(0.9)))
         }
+        // Loop slots from Prep as thin bars along the bottom; the loop that
+        // is playing shaded across the lane.
+        func lx(_ t: Double) -> CGFloat { centreX + CGFloat((t - playhead) / secondsPerPoint) }
+        if let prep {
+            for (n, loop) in prep.loops.enumerated() {
+                let a = lx(loop.start), b = lx(loop.start + Double(loop.beats) * prep.beatSeconds)
+                guard b > 0, a < size.width else { continue }
+                context.fill(Path(CGRect(x: a, y: size.height - 4, width: max(1, b - a), height: 4)), with: .color(Theme.match.opacity(0.55)))
+                context.draw(Text("L\(n + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.match),
+                             at: CGPoint(x: a + 3, y: size.height - 6), anchor: .bottomLeading)
+            }
+        }
+        if deck.loopActive, deck.loopLength > 0 {
+            let a = lx(deck.loopStart), b = lx(deck.loopStart + deck.loopLength)
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(Theme.match.opacity(0.14)))
+            context.fill(Path(CGRect(x: a, y: 0, width: 2, height: size.height)), with: .color(Theme.match))
+            context.fill(Path(CGRect(x: b - 2, y: 0, width: 2, height: size.height)), with: .color(Theme.match))
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(Theme.match))
+        }
+
         // Second ticks so movement is readable before a grid exists.
         var ticks = Path()
         let firstSecond = (playhead - window / 2).rounded(.down)
@@ -93,7 +113,6 @@ struct WaveformLane: View {
             let targetPoints: CGFloat = 2
             let binsPerColumn = max(1, Int((Double(targetPoints) * secondsPerPoint * rate).rounded()))
             let columnSeconds = Double(binsPerColumn) / rate
-            let columnWidth = CGFloat(columnSeconds / secondsPerPoint)
             let firstColumn = Int(((playhead - window / 2) / columnSeconds).rounded(.down)) - 1
             let lastColumn = Int(((playhead + window / 2) / columnSeconds).rounded(.up)) + 1
             var outerPlayed = Path(), outerAhead = Path(), innerPlayed = Path(), innerAhead = Path()
@@ -107,8 +126,11 @@ struct WaveformLane: View {
                     peak = max(peak, peaks[b])
                     loud = max(loud, rms[b])
                 }
-                let x = centreX + CGFloat((Double(column) * columnSeconds - playhead) / secondsPerPoint)
-                let w = max(columnWidth - 0.6, 0.8)
+                let scale = max(context.environment.displayScale, 1)
+                let px = ((centreX + CGFloat((Double(column) * columnSeconds - playhead) / secondsPerPoint)) * scale).rounded()
+                let pxEnd = ((centreX + CGFloat((Double(column + 1) * columnSeconds - playhead) / secondsPerPoint)) * scale).rounded()
+                let x = px / scale
+                let w = max(pxEnd - px - (pxEnd - px >= 3 ? 1 : 0), 1) / scale
                 let hp = max(1, CGFloat(peak) * height)
                 let hr = max(0.5, CGFloat(min(loud, peak)) * height)
                 let outer = CGRect(x: x, y: mid - hp, width: w, height: hp * 2)
@@ -171,6 +193,11 @@ struct TrackOverview: View {
                     let h = max(1, CGFloat(peak) * (mid - 2))
                     let rect = CGRect(x: x, y: mid - h, width: 1.5, height: h * 2)
                     if x < playedX { played.addRect(rect) } else { ahead.addRect(rect) }
+                }
+                if deck.loopActive, deck.loopLength > 0 {
+                    let a = CGFloat(deck.loopStart / track.duration) * size.width
+                    let w = max(2, CGFloat(deck.loopLength / track.duration) * size.width)
+                    context.fill(Path(CGRect(x: a, y: 0, width: w, height: size.height)), with: .color(Theme.match.opacity(0.35)))
                 }
                 context.fill(played, with: .color(deck.color.opacity(0.4)))
                 context.fill(ahead, with: .color(deck.color.opacity(0.85)))

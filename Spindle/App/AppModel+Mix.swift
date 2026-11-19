@@ -233,6 +233,8 @@ extension AppModel {
         e.loopActive = true
         deck.loopActive = true
         deck.activeSlot = loop.id
+        deck.loopStart = e.loopStart
+        deck.loopLength = e.loopLength
     }
 
     func setFX(_ kind: FXKind, _ value: Double, deck: DeckModel, fromMIDI: Bool = false) {
@@ -259,6 +261,8 @@ extension AppModel {
             } ?? now
             e.loopStart = start
             e.loopLength = beat * Double(deck.loopBeats)
+            deck.loopStart = start
+            deck.loopLength = e.loopLength
         }
         e.loopActive = on
     }
@@ -277,8 +281,9 @@ extension AppModel {
 
     func setLoopBeats(_ beats: Int, deck: DeckModel) {
         deck.loopBeats = min(64, max(1, beats))
-        if deck.loopActive, let e = engine?.decks[deck.id] {
+        if deck.loopActive, deck.activeSlot == nil, let e = engine?.decks[deck.id] {
             e.loopLength = e.beatSeconds * Double(deck.loopBeats)
+            deck.loopLength = e.loopLength
         }
     }
 

@@ -113,6 +113,23 @@ private struct LoadBar: View {
     var body: some View {
         let url = model.mixSelection.first
         HStack(spacing: Theme.space4) {
+            HStack(spacing: Theme.space2) {
+                ForEach(model.decks) { deck in
+                    Button {
+                        if let url { Task { await model.load(url: url, into: deck) } }
+                    } label: {
+                        Text("Load \(deck.label)")
+                            .font(Theme.label)
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 70, height: 26)
+                            .background(Theme.control)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(deck.color, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(url == nil)
+                }
+            }
             if let url {
                 let a = model.analysis.analysis(for: url)
                 let prep = model.prep.prep(for: url)
@@ -124,26 +141,9 @@ private struct LoadBar: View {
                 .frame(width: 320, alignment: .leading)
                 cueLine(prep, duration: a?.duration ?? 1)
                 Text(reason(url)).font(Theme.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
-                    .frame(width: 220, alignment: .leading)
+                    .frame(width: 220, alignment: .trailing)
             } else {
-                Text("Select a track to load it. Double-click loads into the free deck; you can also drag a track onto a deck.")
-                    .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                 Spacer()
-            }
-            ForEach(model.decks) { deck in
-                Button {
-                    if let url { Task { await model.load(url: url, into: deck) } }
-                } label: {
-                    Text("Load \(deck.label)")
-                        .font(Theme.label)
-                        .foregroundStyle(Theme.ink)
-                        .frame(width: 70, height: 26)
-                        .background(Theme.control)
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(deck.color, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
-                }
-                .buttonStyle(.plain)
-                .disabled(url == nil)
             }
         }
         .padding(.horizontal, Theme.space3)
@@ -193,7 +193,7 @@ private struct DeckPerformance: View {
         let prep = deck.track.flatMap { model.prep.prep(for: $0.url) }
         HStack(spacing: Theme.space2) {
             // Cues: the first eight.
-            HStack(spacing: 3) {
+            group("Cues") { HStack(spacing: 3) {
                 let cues = Array((prep?.cues ?? []).prefix(8))
                 ForEach(Array(cues.enumerated()), id: \.element.id) { n, cue in
                     Button { model.jump(deck: deck, toCue: n) } label: {
@@ -208,48 +208,82 @@ private struct DeckPerformance: View {
                     .help("\(cue.name) · \(PrepEditorClock.clock(cue.time))")
                 }
                 if cues.isEmpty {
-                    Text("No cues").font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    Text("None").font(Theme.caption).foregroundStyle(Theme.inkFaint).frame(height: 22)
                 }
-            }
-            Divider().frame(height: 20)
-            // Loop slots from Prep, then the free loop.
-            HStack(spacing: 3) {
-                ForEach(Array((prep?.loops ?? []).prefix(6).enumerated()), id: \.element.id) { n, loop in
-                    let on = deck.loopActive && deck.activeSlot == loop.id
-                    Button { model.playLoopSlot(loop, deck: deck) } label: {
-                        Text(SavedLoop.barLabel(loop.bars))
-                            .font(Theme.readoutSm)
+            } }
+            Divider().frame(height: 30)
+            // Free loop: on/off and its length.
+            group("Loop") {
+                HStack(spacing: 2) {
+                    let on = deck.loopActive && deck.activeSlot == nil
+                    Button { model.setLoop(!on, deck: deck) } label: {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(on ? Theme.onAccent : Theme.ink)
-                            .frame(minWidth: 24, minHeight: 22)
+                            .frame(width: 28, height: 22)
                             .background(on ? Theme.match : Theme.control)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
                     }
                     .buttonStyle(.plain)
-                    .help("Loop slot \(n + 1): \(SavedLoop.barLabel(loop.bars)) bars from \(PrepEditorClock.clock(loop.start))")
+                    .disabled(deck.track == nil)
+                    .help(on ? "End the loop" : "Loop from the beat just played")
+                    Button { model.setLoopBeats(deck.loopBeats / 2, deck: deck) } label: {
+                        Image(systemName: "minus").font(.system(size: 9, weight: .bold)).frame(width: 20, height: 22).background(Theme.control)
+                    }
+                    .buttonStyle(.plain).help("Half as long")
+                    Text(Self.loopLength(deck.loopBeats))
+                        .font(Theme.readoutSm).foregroundStyle(Theme.ink)
+                        .frame(width: 58, height: 22).background(Theme.panel)
+                    Button { model.setLoopBeats(deck.loopBeats * 2, deck: deck) } label: {
+                        Image(systemName: "plus").font(.system(size: 9, weight: .bold)).frame(width: 20, height: 22).background(Theme.control)
+                    }
+                    .buttonStyle(.plain).help("Twice as long")
                 }
-                Button {
-                    model.setLoop(!(deck.loopActive && deck.activeSlot == nil), deck: deck)
-                } label: {
-                    let on = deck.loopActive && deck.activeSlot == nil
-                    Text("LOOP \(deck.loopBeats)")
-                        .font(Theme.label)
-                        .foregroundStyle(on ? Theme.onAccent : Theme.ink)
-                        .frame(width: 58, height: 22)
-                        .background(on ? Theme.match : Theme.control)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                .foregroundStyle(Theme.ink)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            }
+            // Loop slots from Prep.
+            if let loops = prep?.loops, !loops.isEmpty {
+                group("Loop slots") {
+                    HStack(spacing: 3) {
+                        ForEach(Array(loops.prefix(6).enumerated()), id: \.element.id) { n, loop in
+                            let on = deck.loopActive && deck.activeSlot == loop.id
+                            Button { model.playLoopSlot(loop, deck: deck) } label: {
+                                HStack(spacing: 3) {
+                                    Text("L\(n + 1)").font(.system(size: 10, weight: .semibold))
+                                    Text(SavedLoop.barLabel(loop.bars)).font(Theme.readoutSm)
+                                        .foregroundStyle(on ? Theme.onAccent : Theme.inkMuted)
+                                }
+                                .foregroundStyle(on ? Theme.onAccent : Theme.match)
+                                .padding(.horizontal, 6)
+                                .frame(height: 22)
+                                .background(on ? Theme.match : Theme.control)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Loop slot L\(n + 1): \(SavedLoop.barLabel(loop.bars)) bars from \(PrepEditorClock.clock(loop.start)). Press again to let the track run on.")
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(deck.track == nil)
-                .help("Loop \(deck.loopBeats) beats from the beat just played")
-                Button("÷2") { model.setLoopBeats(deck.loopBeats / 2, deck: deck) }.buttonStyle(SmallButtonStyle())
-                Button("×2") { model.setLoopBeats(deck.loopBeats * 2, deck: deck) }.buttonStyle(SmallButtonStyle())
             }
             Spacer(minLength: Theme.space2)
             FXKnobs(fx: deck.fx, size: 24, spacing: 6, tint: deck.color) { kind, v in model.setFX(kind, v, deck: deck) }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, 6)
         .background(Theme.panelRaised)
+    }
+
+    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased()).font(.system(size: 9, weight: .medium)).tracking(0.3).foregroundStyle(Theme.inkFaint)
+            content()
+        }
+    }
+
+    static func loopLength(_ beats: Int) -> String {
+        if beats >= 4 && beats % 4 == 0 { return beats == 4 ? "1 bar" : "\(beats / 4) bars" }
+        return beats == 1 ? "1 beat" : "\(beats) beats"
     }
 }
 

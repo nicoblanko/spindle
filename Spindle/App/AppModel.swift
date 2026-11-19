@@ -25,6 +25,9 @@ final class DeckModel: Identifiable {
     var loopBeats = 8
     /// The loop slot playing on this deck, if any.
     var activeSlot: UUID?
+    /// The loop that's playing (seconds), for the waveforms.
+    var loopStart: Double = 0
+    var loopLength: Double = 0
     /// The deck's FX amounts (filter −1 … 1, the rest 0 … 1).
     var fx = ClipFX()
     var filter: Double { get { fx.filter } set { fx.filter = newValue } }

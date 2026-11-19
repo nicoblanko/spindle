@@ -239,6 +239,9 @@ extension ContentView {
             organizeSet = set
             organizeTag = tag
         }
+        if let a = model.decks[0].track.flatMap({ model.prep.prep(for: $0.url) })?.loops.first {
+            model.playLoopSlot(a, deck: model.decks[0])
+        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -290,6 +293,7 @@ extension ContentView {
             }
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
+        model.setLoop(false, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
         model.stack = savedStack
         model.played = []

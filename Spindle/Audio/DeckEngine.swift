@@ -110,6 +110,11 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private static let fadeFrames = 240
     private var fadeFrom: Double = 0
     private var fadeLeft = 0
+    /// Fades the track out when it isn't moving: a stopped deck would
+    /// otherwise hold the sample under the playhead, and every move while
+    /// stopped would be heard as a soft thump.
+    private var motionGain: Float = 0
+    private let motionStep: Float
 
     @inline(__always)
     private func startFade(from old: Double) {
@@ -194,6 +199,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         confirmBits = Int(0.3 * definition.bitRate)
         clickDecay = Float(exp(-1 / (0.025 * sampleRate)))
         effects = FXChain(sampleRate: sampleRate)
+        motionStep = Float(1 / (0.004 * sampleRate))
         telemetry = .allocate(capacity: 1)
         telemetry.initialize(to: DeckTelemetry())
         scope = .allocate(capacity: Self.scopeFrames * 2)
@@ -353,6 +359,11 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 fadeFrom += r / sampleRate
                 fadeLeft -= 1
             }
+            // Moving at all (playing, scratching, nudging): sound; stopped: silence.
+            let moving = abs(r) > 0.002 || abs(nudgeStep) > 1e-7
+            motionGain = moving ? min(1, motionGain + motionStep) : max(0, motionGain - motionStep)
+            outL *= motionGain
+            outR *= motionGain
             if filterOn {
                 func run(_ v0: Float, _ c1: inout Float, _ c2: inout Float) -> Float {
                     let v3 = v0 - c2
@@ -527,7 +538,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// largest step between samples (a clean tone stays under ~0.03).
     static func scrubTest() -> String {
         let rate = 48000.0, frames = Int(rate * 10)
-        func run(nudge: Bool) -> Float {
+        func run(nudge: Bool, stopped: Bool = false) -> Float {
             let l = UnsafeMutablePointer<Float>.allocate(capacity: frames)
             let r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
             for i in 0..<frames { let v = Float(0.5 * sin(2 * .pi * 440 * Double(i) / rate)); l[i] = v; r[i] = v }
@@ -537,7 +548,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             deck.internalMode = true
             _ = deck.exchangeTrack(samples)
             deck.jumpRequest = 1
-            deck.transportPlaying = true
+            deck.transportPlaying = !stopped
             let outL = UnsafeMutablePointer<Float>.allocate(capacity: 128), outR = UnsafeMutablePointer<Float>.allocate(capacity: 128)
             var last: Float = 0, worst: Float = 0
             for b in 0..<600 {
@@ -546,13 +557,14 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 }
                 deck.render(left: outL, right: outR, frames: 128, mix: false)
                 for i in 0..<128 {
-                    if b > 30 { worst = max(worst, abs(outL[i] - last)) }
+                    if b > 30 { worst = max(worst, stopped ? abs(outL[i]) : abs(outL[i] - last)) }
                     last = outL[i]
                 }
             }
             samples.pointee.free(); samples.deallocate(); outL.deallocate(); outR.deallocate()
             return worst
         }
-        return String(format: "Scrub test: largest sample step with jumps %.3f, with nudges %.3f (clean tone ≈ 0.029)", run(nudge: false), run(nudge: true))
+        return String(format: "Scrub test: largest sample step with jumps %.3f, with nudges %.3f (clean tone ≈ 0.029); loudest output scrolling while stopped %.4f (should be 0)",
+                      run(nudge: false), run(nudge: true), run(nudge: false, stopped: true))
     }
 }
