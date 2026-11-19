@@ -25,6 +25,12 @@ All four pages work:
   Technics SL-1210 MK2). Absolute and relative modes, needle drops, and
   playing on when the needle leaves the record. Simulated turntables
   (MK1 or MK2) when no sound card is connected.
+- **Laptop mode:** play without turntables. Play/pause, cue, sync (tempo
+  and beats), tempo ±8/16/50%, nudge, and a built-in mixer with volume
+  faders and a crossfader. Choose Vinyl, Laptop or Simulated vinyl under
+  "Play with".
+- **Waveforms:** scroll, drag or click the whole-track strip and the zoomed
+  waveform to move through a track; pinch or ⌘-scroll to zoom.
 - **MIDI learn** for controllers such as the Akai MPK mini, with soft
   takeover for absolute knobs.
 

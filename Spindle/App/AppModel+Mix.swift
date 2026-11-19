@@ -159,13 +159,22 @@ extension AppModel {
 
     func setupMIDI() {
         midi.currentValue = { [weak self] target in
-            guard let self, let id = target.deck else { return 0 }
-            return target.action == .filter ? self.decks[id].filter : self.decks[id].echo
+            guard let self else { return 0 }
+            guard let id = target.deck else { return self.crossfader }
+            let deck = self.decks[id]
+            switch target.action {
+            case .filter: return deck.filter
+            case .echo: return deck.echo
+            case .tempo: return deck.tempo / deck.tempoRange
+            case .volume: return deck.volume
+            default: return 0
+            }
         }
         midi.handler = { [weak self] target, value in
             guard let self else { return }
             guard let id = target.deck else {
                 if target.action == .record { self.toggleRecording() }
+                if target.action == .crossfader { self.setCrossfader(abs(value) < 0.03 ? 0 : value) }
                 return
             }
             let deck = self.decks[id]
@@ -181,10 +190,106 @@ extension AppModel {
             case .echo: self.setEcho(value, deck: deck, fromMIDI: true)
             case .loadSelected:
                 if let url = self.highlightedClip { Task { await self.load(url: url, into: deck) } }
-            case .record: self.toggleRecording()
+            case .play: self.setPlaying(!deck.transportPlaying, deck: deck)
+            case .cueButton: self.cue(deck: deck)
+            case .sync: self.sync(deck: deck)
+            case .tempo: self.setTempo((abs(value) < 0.02 ? 0 : value) * deck.tempoRange, deck: deck)
+            case .volume: self.setVolume(value, deck: deck)
+            case .record, .crossfader: break
             }
         }
         midi.start()
+    }
+
+    // MARK: Laptop mode
+
+    func setPlaying(_ on: Bool, deck: DeckModel) {
+        deck.transportPlaying = on && deck.track != nil
+        engine?.decks[deck.id].transportPlaying = deck.transportPlaying
+    }
+
+    /// Back to the IN cue (or the start) and stop, like a CDJ's cue button.
+    func cue(deck: DeckModel) {
+        setPlaying(false, deck: deck)
+        let start = deck.track.flatMap { prep.prep(for: $0.url)?.cue(.intro)?.time } ?? 0
+        engine?.decks[deck.id].jumpRequest = start
+    }
+
+    func setTempo(_ value: Double, deck: DeckModel) {
+        deck.tempo = min(max(value, -0.5), 0.5)
+        if abs(deck.tempo) > deck.tempoRange { deck.tempoRange = abs(deck.tempo) > 0.16 ? 0.5 : 0.16 }
+        engine?.decks[deck.id].tempo = 1 + deck.tempo
+    }
+
+    /// Matches this deck's tempo to the other deck and lines up the beats.
+    func sync(deck: DeckModel) {
+        let other = decks[1 - deck.id]
+        guard let mine = deck.track?.url, let theirs = other.track?.url,
+              let myBPM = bpm(of: mine), let theirBPM = bpm(of: theirs), let engine else { return }
+        let target = theirBPM * (1 + other.tempo)
+        // Half or double time if that is closer.
+        let base = [myBPM, myBPM * 2, myBPM / 2].min { abs(target / $0 - 1) < abs(target / $1 - 1) } ?? myBPM
+        setTempo(target / base - 1, deck: deck)
+
+        if let myGrid = prep.prep(for: mine), let theirGrid = prep.prep(for: theirs) {
+            let theirPhase = theirGrid.beatIndex(at: engine.decks[other.id].telemetry.pointee.playhead)
+            let now = engine.decks[deck.id].telemetry.pointee.playhead
+            let mineIndex = myGrid.beatIndex(at: now)
+            var wanted = mineIndex.rounded(.down) + (theirPhase - theirPhase.rounded(.down))
+            if wanted - mineIndex > 0.5 { wanted -= 1 }
+            if wanted - mineIndex < -0.5 { wanted += 1 }
+            // Before the first beat (e.g. a track still at 0:00): move on by
+            // whole bars rather than clamp, so the phase stays right.
+            while myGrid.gridOffset + wanted * myGrid.beatSeconds < 0 { wanted += 4 }
+            seek(deck: deck, to: myGrid.gridOffset + wanted * myGrid.beatSeconds)
+        }
+    }
+
+    func bpm(of url: URL) -> Double? { prep.prep(for: url)?.bpm ?? analysis.analysis(for: url)?.bpm }
+
+    func setVolume(_ value: Double, deck: DeckModel) {
+        deck.volume = min(max(value, 0), 1)
+        updateGains()
+    }
+
+    func setCrossfader(_ value: Double) {
+        crossfader = min(max(value, -1), 1)
+        updateGains()
+    }
+
+    /// Laptop mode mixes in Spindle (volume × crossfader); with turntables the
+    /// hardware mixer does it and the decks play at full level.
+    func updateGains() {
+        guard let engine else { return }
+        for deck in decks {
+            var gain = 1.0
+            if engine.laptop {
+                let fade = deck.id == 0 ? (crossfader <= 0 ? 1 : 1 - crossfader) : (crossfader >= 0 ? 1 : 1 + crossfader)
+                gain = deck.volume * deck.volume * fade        // squared: a fader-like curve
+            }
+            engine.decks[deck.id].gain = Float(gain)
+        }
+    }
+
+    // MARK: Seeking
+
+    /// Moves the track to `time` (with turntables the record keeps control
+    /// from there).
+    func seek(deck: DeckModel, to time: Double) {
+        guard let track = deck.track, let e = engine?.decks[deck.id] else { return }
+        e.jumpRequest = min(max(time, 0), track.duration)
+    }
+
+    /// Moves the track by `delta` seconds; repeated calls between audio
+    /// buffers add up.
+    func seek(deck: DeckModel, by delta: Double) {
+        guard let e = engine?.decks[deck.id] else { return }
+        let base = e.jumpRequest.isNaN ? e.telemetry.pointee.playhead : e.jumpRequest
+        seek(deck: deck, to: base + delta)
+    }
+
+    func setLaneWindow(_ seconds: Double, deck: DeckModel) {
+        deck.laneWindow = min(max(seconds, 1.5), 48)
     }
 
     /// Effective tempo of a deck: the track's BPM times the record's speed.

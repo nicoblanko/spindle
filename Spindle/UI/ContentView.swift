@@ -76,7 +76,25 @@ extension ContentView {
         if tracks.count > 1 {
             await model.load(url: tracks[0].url, into: model.decks[0])
             await model.load(url: tracks[1].url, into: model.decks[1])
-            model.setSimulatedPitch(1, deck: model.decks[0])
+            if model.laptop {
+                model.setPlaying(true, deck: model.decks[0])
+                try? await Task.sleep(for: .seconds(1))
+                model.sync(deck: model.decks[1])
+                model.setPlaying(true, deck: model.decks[1])
+                try? await Task.sleep(for: .seconds(2))
+                if let engine = model.engine,
+                   let a = model.decks[0].track.flatMap({ model.prep.prep(for: $0.url) }),
+                   let b = model.decks[1].track.flatMap({ model.prep.prep(for: $0.url) }) {
+                    let pa = a.beatIndex(at: engine.decks[0].telemetry.pointee.playhead)
+                    let pb = b.beatIndex(at: engine.decks[1].telemetry.pointee.playhead)
+                    var diff = (pa - pa.rounded(.down)) - (pb - pb.rounded(.down))
+                    if diff > 0.5 { diff -= 1 } else if diff < -0.5 { diff += 1 }
+                    spindleLog.notice(String(format: "Sync check: A %.2f BPM, B %.2f BPM, beat phase difference %.3f beats (%.1f ms)",
+                        a.bpm * (1 + model.decks[0].tempo), b.bpm * (1 + model.decks[1].tempo), diff, diff * a.beatSeconds * 1000))
+                }
+            } else {
+                model.setSimulatedPitch(1, deck: model.decks[0])
+            }
             model.selectForPrep(tracks[0].url)
             model.highlightedClip = tracks[2 % tracks.count].url
         }
@@ -101,6 +119,7 @@ extension ContentView {
             spindleLog.notice("Snapshot: \(url.path)")
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
+        for deck in model.decks { model.setPlaying(false, deck: deck) }
         model.page = original
     }
 }
@@ -128,15 +147,25 @@ private struct TopBar: View {
             }
             .frame(maxWidth: 320)
 
-            Picker("Vinyl", selection: $model.definition) {
-                ForEach(TimecodeDefinition.all) { def in
-                    Text(def.name).tag(def)
+            if model.controlMode != .laptop {
+                Picker("Vinyl", selection: $model.definition) {
+                    ForEach(TimecodeDefinition.all) { def in
+                        Text(def.name).tag(def)
+                    }
                 }
+                .frame(maxWidth: 240)
             }
-            .frame(maxWidth: 240)
 
-            Toggle("Simulate", isOn: $model.simulate)
-                .toggleStyle(.checkbox)
+            Picker("Play with", selection: Binding(
+                get: { model.controlMode },
+                set: { mode in
+                    model.controlMode = mode
+                    Task { await model.start() }
+                })) {
+                ForEach(AppModel.ControlMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .frame(maxWidth: 220)
+            .help("Vinyl: Traktor timecode records. Laptop: play from Spindle alone. Simulated vinyl: virtual turntables for testing.")
 
             Button(model.running ? "Restart" : "Start") {
                 Task { await model.start() }
@@ -164,7 +193,7 @@ private struct TopBar: View {
             let ms = Double(engine.bufferFrames) / engine.sampleRate * 1000
             Text(String(format: "%.0f kHz · %d smp · %.1f ms%@",
                         engine.sampleRate / 1000, engine.bufferFrames, ms,
-                        engine.simulate ? " · SIM" : ""))
+                        engine.simulate ? " · SIM" : (engine.laptop ? " · LAPTOP" : "")))
                 .font(Theme.readoutSm)
                 .foregroundStyle(Theme.inkMuted)
         } else {

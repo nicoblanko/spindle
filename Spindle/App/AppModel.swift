@@ -27,6 +27,17 @@ final class DeckModel: Identifiable {
     var filter: Double = 0
     /// 0 … 1.
     var echo: Double = 0
+    // Laptop mode transport.
+    var transportPlaying = false
+    /// Tempo change in laptop mode: 0.05 = +5%.
+    var tempo: Double = 0
+    /// ± range of the tempo slider.
+    var tempoRange: Double = 0.08
+    /// Channel volume in laptop mode, 0…1.
+    var volume: Double = 1
+    /// Seconds shown across the zoomed waveform.
+    var laneWindow: Double = 6
+
     /// Updated a few times a second from the engine: playing forward at speed.
     var playing = false
     /// Current speed (1 = the track's own tempo).
@@ -91,7 +102,20 @@ final class AppModel {
     var devices: [AudioDevice] = []
     var selectedDeviceID: AudioDeviceID?
     var definition: TimecodeDefinition = .traktorMK2
-    var simulate = false
+    /// How the decks are played: turntables, the laptop alone, or simulated
+    /// turntables (for testing). Remembered between launches.
+    var controlMode: ControlMode = ControlMode(rawValue: UserDefaults.standard.string(forKey: "control") ?? "") ?? .laptop {
+        didSet { UserDefaults.standard.set(controlMode.rawValue, forKey: "control") }
+    }
+    var simulate: Bool { controlMode == .simulated }
+    var laptop: Bool { engine?.laptop ?? (controlMode == .laptop) }
+    /// Laptop mode's crossfader: −1 = deck A only, 0 = both, 1 = deck B only.
+    var crossfader: Double = 0
+
+    enum ControlMode: String, CaseIterable, Identifiable {
+        case vinyl = "Vinyl", laptop = "Laptop", simulated = "Simulated vinyl"
+        var id: String { rawValue }
+    }
     private(set) var engine: AudioEngineCore?
     private(set) var running = false
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
@@ -142,7 +166,10 @@ final class AppModel {
 
     init() {
         refreshDevices()
-        simulate = !(selectedDevice?.isXone ?? false)
+        // Turntables when the Xone is there; otherwise play from the laptop.
+        if UserDefaults.standard.string(forKey: "control") == nil || controlMode == .vinyl {
+            controlMode = (selectedDevice?.isXone ?? false) ? .vinyl : .laptop
+        }
         setupMIDI()
     }
 
@@ -158,12 +185,12 @@ final class AppModel {
     func start() async {
         stop()
         error = nil
-        spindleLog.notice("Start: device \(selectedDevice?.name ?? "none"), simulate \(simulate), vinyl \(definition.id)")
+        spindleLog.notice("Start: device \(selectedDevice?.name ?? "none"), control \(controlMode.rawValue), vinyl \(definition.id)")
         guard let device = selectedDevice.flatMap({ AudioDevices.device($0.id) }) else {
             error = "No audio device selected."
             return
         }
-        if !simulate && device.inputChannels >= 2 {
+        if controlMode == .vinyl && device.inputChannels >= 2 {
             let status = AVCaptureDevice.authorizationStatus(for: .audio)
             spindleLog.notice("Audio input permission: \(status.rawValue) (0 not asked, 1 restricted, 2 denied, 3 allowed)")
             if status != .authorized {
@@ -184,16 +211,17 @@ final class AppModel {
         }
         let definition = definition
         let simulate = simulate
+        let laptop = controlMode == .laptop
         let routing = routing
         // Building the 32 MB position table takes a moment; keep it off the main thread.
         spindleLog.notice("Building engine")
         let core = await Task.detached {
             _ = TimecodeLookup.shared(for: definition)
-            return AudioEngineCore(device: device, definition: definition, simulate: simulate, routing: routing)
+            return AudioEngineCore(device: device, definition: definition, simulate: simulate, laptop: laptop, routing: routing)
         }.value
         do {
             try core.start()
-            spindleLog.notice("Engine running: \(core.sampleRate) Hz, buffer \(core.bufferFrames), simulate \(core.simulate)")
+            spindleLog.notice("Engine running: \(core.sampleRate) Hz, buffer \(core.bufferFrames), simulate \(core.simulate), laptop \(core.laptop)")
         } catch {
             spindleLog.error("Engine failed: \(error.localizedDescription)")
             self.error = error.localizedDescription
@@ -201,6 +229,7 @@ final class AppModel {
         }
         engine = core
         running = true
+        updateGains()
         rememberLocks()
         monitorDecks()
         core.recordInput = recordInputDefault(for: core)
@@ -214,6 +243,9 @@ final class AppModel {
             core.decks[deck.id].echo = deck.echo
             if let url = deck.track?.url, let p = prep.prep(for: url) { core.decks[deck.id].beatSeconds = p.beatSeconds }
             core.simulators[deck.id].targetPitch = deck.simulatedPitch
+            deck.transportPlaying = false
+            core.decks[deck.id].transportPlaying = false
+            core.decks[deck.id].tempo = 1 + deck.tempo
             if let track = deck.track {
                 if track.samples.pointee.sampleRate == core.sampleRate {
                     _ = core.decks[deck.id].exchangeTrack(track.samples)
@@ -246,6 +278,7 @@ final class AppModel {
             _ = engine?.decks[deck.id].exchangeTrack(track.samples)
             if let old { retire(old.samples) }
             applyClip(track.url, to: deck)
+            setPlaying(false, deck: deck)
             spindleLog.notice("Deck \(deck.label) loaded \(track.title), \(track.duration) s, engine \(self.engine == nil ? "off" : "on")")
         } catch {
             spindleLog.error("Deck \(deck.label) failed: \(error.localizedDescription)")

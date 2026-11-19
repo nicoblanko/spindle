@@ -14,14 +14,23 @@ import Foundation
 import Observation
 
 nonisolated enum MIDIAction: String, Codable, Sendable, CaseIterable {
+    case play, cueButton, sync, tempo, volume
     case cue1, cue2, cue3, cue4, loop, loopHalve, loopDouble, filter, echo, loadSelected
-    case record
+    case record, crossfader
 
-    var isContinuous: Bool { self == .filter || self == .echo }
-    var perDeck: Bool { self != .record }
+    var isContinuous: Bool { [.filter, .echo, .tempo, .volume, .crossfader].contains(self) }
+    /// Knobs whose range is −1…1 (centre = off).
+    var bipolar: Bool { [.filter, .tempo, .crossfader].contains(self) }
+    var perDeck: Bool { self != .record && self != .crossfader }
 
     var name: String {
         switch self {
+        case .play: "Play/pause (laptop)"
+        case .cueButton: "CUE (laptop)"
+        case .sync: "Sync (laptop)"
+        case .tempo: "Tempo (laptop)"
+        case .volume: "Volume (laptop)"
+        case .crossfader: "Crossfader (laptop)"
         case .cue1: "Cue 1 · IN"
         case .cue2: "Cue 2 · DROP"
         case .cue3: "Cue 3 · BRK"
@@ -48,6 +57,7 @@ nonisolated struct MIDITarget: Codable, Sendable, Hashable, Identifiable {
         for deck in [0, 1] {
             for action in MIDIAction.allCases where action.perDeck { list.append(MIDITarget(deck: deck, action: action)) }
         }
+        list.append(MIDITarget(deck: nil, action: .crossfader))
         list.append(MIDITarget(deck: nil, action: .record))
         return list
     }
@@ -166,7 +176,7 @@ final class MIDIController {
 
         for (target, bound) in bindings where bound == control {
             if target.action.isContinuous {
-                if target.action == .filter { value = value * 2 - 1 }
+                if target.action.bipolar { value = value * 2 - 1 }
                 let current = currentValue?(target) ?? value
                 // Soft takeover: wait until the knob reaches the current value.
                 if !engaged.contains(target) {

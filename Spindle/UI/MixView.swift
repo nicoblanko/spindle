@@ -30,6 +30,43 @@ struct MixView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             .background(Theme.line)
+            if model.laptop {
+                Rectangle().fill(Theme.line).frame(height: 1)
+                LaptopMixer(model: model)
+            }
+        }
+    }
+}
+
+/// Laptop mode's mixer: a volume fader per deck and the crossfader.
+private struct LaptopMixer: View {
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: Theme.space3) {
+            fader(model.decks[0])
+            Spacer()
+            Text("A").font(Theme.label).foregroundStyle(Theme.deckA)
+            Slider(value: Binding(get: { model.crossfader }, set: { model.setCrossfader(abs($0) < 0.04 ? 0 : $0) }), in: -1...1)
+                .frame(width: 260)
+                .tint(Theme.inkMuted)
+            Text("B").font(Theme.label).foregroundStyle(Theme.deckB)
+            Button("Centre") { model.setCrossfader(0) }.buttonStyle(FlatButtonStyle())
+            Spacer()
+            fader(model.decks[1])
+        }
+        .padding(.horizontal, Theme.space3)
+        .padding(.vertical, Theme.space2)
+        .background(Theme.panelRaised)
+    }
+
+    private func fader(_ deck: DeckModel) -> some View {
+        HStack(spacing: Theme.space2) {
+            Text("VOL \(deck.label)").font(Theme.label).foregroundStyle(deck.color)
+            Slider(value: Binding(get: { deck.volume }, set: { model.setVolume($0, deck: deck) }), in: 0...1)
+                .frame(width: 160)
+                .tint(deck.color)
+            Text(String(format: "%3.0f", deck.volume * 100)).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 28)
         }
     }
 }

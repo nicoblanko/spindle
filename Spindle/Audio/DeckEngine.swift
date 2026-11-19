@@ -80,6 +80,17 @@ nonisolated final class DeckEngine: @unchecked Sendable {
 
     var toneFrequency: Double = 440
 
+    // MARK: Laptop mode (no timecode)
+
+    /// The deck is driven by its own transport instead of a record.
+    var internalMode = false
+    var transportPlaying = false
+    /// Playback speed in laptop mode (1 = the track's own tempo).
+    var tempo: Double = 1
+    /// Channel level (laptop mode's built-in mixer: volume × crossfader).
+    var gain: Float = 1
+    private var currentGain: Float = 1
+
     // MARK: Cues, loops, FX (set from the UI)
 
     /// Jump the track to this time (seconds); NaN = none. The record keeps
@@ -209,24 +220,31 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             trackOffset -= delta
             jumpRequest = .nan
         }
-        updateCoasting(decoder: decoder, frames: frames)
-        if coasting {
-            target = coastPitch
-        }
-        if anchorPending && decoder.hasPosition && !coasting {
-            // Tie the track to the record where it is now.
-            trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
-            anchorPending = false
-        }
-        let position = decoder.positionSeconds(startIndex: startIndex) - trackOffset
-        let absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
-        if absolute {
-            let error = position - playhead
-            if abs(error) > 0.15 {
-                playhead = position                  // needle drop
-            } else {
-                target += error * 2                  // pull gently into place
+        var position = 0.0
+        var absolute = false
+        if internalMode {
+            target = transportPlaying ? tempo : 0
+        } else {
+            updateCoasting(decoder: decoder, frames: frames)
+            if coasting {
+                target = coastPitch
             }
+            if anchorPending && decoder.hasPosition && !coasting {
+                // Tie the track to the record where it is now.
+                trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
+                anchorPending = false
+            }
+            position = decoder.positionSeconds(startIndex: startIndex) - trackOffset
+            absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
+            if absolute {
+                let error = position - playhead
+                if abs(error) > 0.15 {
+                    playhead = position                  // needle drop
+                } else {
+                    target += error * 2                  // pull gently into place
+                }
+            }
+
         }
 
         let start = rate
@@ -284,6 +302,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 delaySamples = wantedDelay       // start at the right time, no sweep
             }
             delayWrite = (delayWrite + 1) & (Self.delayFrames - 1)
+            currentGain += (gain - currentGain) * 0.002
+            outL *= currentGain
+            outR *= currentGain
             if testTone {
                 let tone = Float(sin(tonePhase)) * 0.1
                 tonePhase += 2 * .pi * toneFrequency / sampleRate
@@ -316,7 +337,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         samplesSinceLock = decoder.hasPosition ? 0 : samplesSinceLock + frames
 
         telemetry.pointee = DeckTelemetry(
-            pitch: coasting ? coastPitch : decoder.pitch,
+            pitch: internalMode ? target : (coasting ? coastPitch : decoder.pitch),
             forwards: decoder.forwards,
             playhead: playhead,
             timecodeSeconds: decoder.hasPosition ? position : telemetry.pointee.timecodeSeconds,

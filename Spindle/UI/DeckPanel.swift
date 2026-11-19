@@ -76,19 +76,74 @@ struct DeckPanel: View {
         .background(Theme.panelRaised)
     }
 
-    /// The whole track on top, the zoomed scrolling waveform below.
+    /// The whole track on top (click, drag or scroll to move through it), the
+    /// zoomed scrolling waveform below (scroll or drag to scrub, pinch or
+    /// ⌘-scroll to zoom).
     private var waveforms: some View {
         VStack(spacing: 1) {
-            TrackOverview(deck: deck, telemetry: engine?.telemetry)
-                .frame(height: 32)
-            WaveformLane(deck: deck, telemetry: engine?.telemetry, prep: deck.track.flatMap { model.prep.prep(for: $0.url) })
-                .frame(height: compact ? 96 : 150)
+            GeometryReader { geo in
+                TrackOverview(deck: deck, telemetry: engine?.telemetry)
+                    .overlay {
+                        WaveformInteraction(
+                            onScroll: { points in
+                                guard let d = deck.track?.duration else { return }
+                                model.seek(deck: deck, by: Double(points) * d / Double(max(geo.size.width, 1)))
+                            },
+                            onClick: { fraction in
+                                guard let d = deck.track?.duration else { return }
+                                model.seek(deck: deck, to: Double(fraction) * d)
+                            },
+                            dragsAbsolutely: true)
+                    }
+            }
+            .frame(height: 32)
+            GeometryReader { geo in
+                WaveformLane(deck: deck, telemetry: engine?.telemetry,
+                             prep: deck.track.flatMap { model.prep.prep(for: $0.url) },
+                             window: deck.laneWindow)
+                    .overlay {
+                        WaveformInteraction(
+                            onScroll: { points in
+                                model.seek(deck: deck, by: Double(points) * deck.laneWindow / Double(max(geo.size.width, 1)))
+                            },
+                            onClick: { fraction in
+                                model.seek(deck: deck, by: (Double(fraction) - 0.5) * deck.laneWindow)
+                            },
+                            onZoom: { factor in
+                                model.setLaneWindow(deck.laneWindow / Double(factor), deck: deck)
+                            })
+                    }
+                    .overlay(alignment: .topTrailing) { zoomButtons }
+            }
+            .frame(height: compact ? 96 : 150)
         }
         .background(Theme.line)
     }
 
-    /// Routing and deck options.
+    private var zoomButtons: some View {
+        HStack(spacing: 1) {
+            Button("−") { model.setLaneWindow(deck.laneWindow * 1.5, deck: deck) }
+            Text(String(format: "%.0f s", deck.laneWindow))
+                .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
+                .frame(width: 34).frame(height: 18).background(Theme.panelRaised)
+            Button("+") { model.setLaneWindow(deck.laneWindow / 1.5, deck: deck) }
+        }
+        .buttonStyle(ZoomButtonStyle())
+        .padding(Theme.space1)
+        .help("Zoom: pinch or ⌘-scroll on the waveform")
+    }
+
+    /// Routing and deck options; in laptop mode the transport.
+    @ViewBuilder
     private var controls: some View {
+        if model.laptop {
+            LaptopTransport(deck: deck, model: model)
+        } else {
+            vinylControls
+        }
+    }
+
+    private var vinylControls: some View {
         HStack(spacing: Theme.space3) {
             routingPickers
             Toggle("Test tone", isOn: Binding(
@@ -204,14 +259,19 @@ struct DeckPanel: View {
                 .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 70, alignment: .leading)
             Text(Self.pitch(t.pitch)).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 64, alignment: .leading)
             Text(abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀")).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 14)
-            Text(t.absolute ? "ABS" : "REL").font(Theme.readoutSm).foregroundStyle(t.absolute ? Theme.ink : Theme.inkMuted).frame(width: 30)
+            if model.laptop {
+                Text(model.liveBPM(deck).map { String(format: "%.1f BPM", $0 * max(abs(t.pitch), 0.0001) / max(abs(deck.pitch), 0.0001)) } ?? "")
+                    .font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 90, alignment: .leading)
+            } else {
+                Text(t.absolute ? "ABS" : "REL").font(Theme.readoutSm).foregroundStyle(t.absolute ? Theme.ink : Theme.inkMuted).frame(width: 30)
+            }
             Spacer(minLength: 0)
             if t.coasting {
                 Button("■ Stop deck") { model.stopCoasting(deck: deck) }
                     .font(Theme.readoutSm).buttonStyle(.plain).foregroundStyle(Theme.ink)
                     .padding(.horizontal, 6).background(Theme.control)
             }
-            lockBadge(t)
+            if !model.laptop { lockBadge(t) }
         }
         .frame(height: 22)
     }
@@ -293,6 +353,68 @@ struct DeckPanel: View {
 
     static func db(_ level: Float) -> String {
         level < 0.0001 ? "−∞ dB" : String(format: "%.0f dB", 20 * log10(level))
+    }
+}
+
+struct ZoomButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.readoutSm)
+            .foregroundStyle(Theme.ink)
+            .frame(width: 18, height: 18)
+            .background(configuration.isPressed ? Theme.line : Theme.control)
+    }
+}
+
+/// Laptop mode: play/pause, cue, sync, tempo and nudge for one deck.
+struct LaptopTransport: View {
+    @Bindable var deck: DeckModel
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: Theme.space2) {
+            Button {
+                model.setPlaying(!deck.transportPlaying, deck: deck)
+            } label: {
+                Image(systemName: deck.transportPlaying ? "pause.fill" : "play.fill")
+                    .frame(width: 34, height: 22)
+                    .foregroundStyle(deck.transportPlaying ? Theme.onAccent : Theme.ink)
+                    .background(deck.transportPlaying ? deck.color : Theme.control)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            }
+            .buttonStyle(.plain)
+            .disabled(deck.track == nil)
+            Button("CUE") { model.cue(deck: deck) }
+                .buttonStyle(FlatButtonStyle())
+                .help("Back to cue 1 (IN), or the start, and stop")
+            Button("SYNC") { model.sync(deck: deck) }
+                .buttonStyle(FlatButtonStyle())
+                .disabled(deck.track == nil || model.decks[1 - deck.id].track == nil)
+                .help("Match the other deck's tempo and line up the beats")
+            Divider().frame(height: 18)
+            Button("‹") { model.seek(deck: deck, by: -0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge back 20 ms")
+            Button("›") { model.seek(deck: deck, by: 0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge forward 20 ms")
+            Divider().frame(height: 18)
+            Text("TEMPO").font(Theme.label).foregroundStyle(Theme.inkMuted)
+            Slider(value: Binding(get: { deck.tempo }, set: { model.setTempo($0, deck: deck) }),
+                   in: -deck.tempoRange...deck.tempoRange)
+                .frame(minWidth: 90)
+            Text(String(format: "%+.2f%%", deck.tempo * 100))
+                .font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 56, alignment: .trailing)
+            Button("0") { model.setTempo(0, deck: deck) }.buttonStyle(FlatButtonStyle()).help("Back to the track's own tempo")
+            Picker("", selection: $deck.tempoRange) {
+                Text("±8").tag(0.08)
+                Text("±16").tag(0.16)
+                Text("±50").tag(0.5)
+            }
+            .frame(width: 64)
+        }
+        .tint(deck.color)
+        .font(Theme.caption)
+        .foregroundStyle(Theme.inkMuted)
+        .padding(.horizontal, Theme.space3)
+        .padding(.vertical, Theme.space2)
+        .background(Theme.panelRaised)
     }
 }
 

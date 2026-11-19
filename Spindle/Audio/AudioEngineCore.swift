@@ -73,18 +73,23 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
     /// Whether this device can supply a recording input pair.
     var hasInputs: Bool { inputChannels >= 2 }
 
-    init(device: AudioDevice, definition: TimecodeDefinition, simulate: Bool, routing: EngineRouting) {
+    /// Laptop mode: no timecode, the decks play from their own transport.
+    let laptop: Bool
+
+    init(device: AudioDevice, definition: TimecodeDefinition, simulate: Bool, laptop: Bool = false, routing: EngineRouting) {
+        self.laptop = laptop
         self.device = device
         self.sampleRate = device.sampleRate > 0 ? device.sampleRate : 48000
-        self.simulate = simulate || device.inputChannels < 2
+        self.simulate = !laptop && (simulate || device.inputChannels < 2)
         self.definition = definition
         self.routing = routing
-        inputChannels = self.simulate ? 0 : device.inputChannels
+        inputChannels = self.simulate || laptop ? 0 : device.inputChannels
         outputChannels = device.outputChannels
 
         decks = [DeckEngine(definition: definition, sampleRate: sampleRate),
                  DeckEngine(definition: definition, sampleRate: sampleRate)]
         simulators = [TimecodeSimulator(definition: definition), TimecodeSimulator(definition: definition)]
+        for deck in decks { deck.internalMode = laptop }
 
         inputList = AudioBufferList.allocate(maximumBuffers: max(inputChannels, 1))
         var data: [UnsafeMutablePointer<Float>] = []
@@ -199,7 +204,7 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
             }
         }
 
-        for (index, deck) in decks.enumerated() {
+        for (index, deck) in decks.enumerated() where !laptop {
             let left: UnsafeMutablePointer<Float>
             let right: UnsafeMutablePointer<Float>
             if simulate {
