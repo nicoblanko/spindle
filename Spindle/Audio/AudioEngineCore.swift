@@ -67,6 +67,9 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
         self.device = device
         self.sampleRate = device.sampleRate > 0 ? device.sampleRate : 48000
         self.simulate = simulate || device.inputChannels < 2
+        // The simulator generates MK1 timecode, which decodes exactly, so the
+        // virtual turntables work whatever vinyl is selected.
+        let definition = self.simulate ? TimecodeDefinition.traktorA : definition
         self.definition = definition
         self.routing = routing
         inputChannels = self.simulate ? 0 : device.inputChannels

@@ -193,7 +193,7 @@ struct DeckPanel: View {
     private var simulator: some View {
         VStack(alignment: .leading, spacing: Theme.space2) {
             HStack {
-                LabelText("Simulated turntable")
+                LabelText("Simulated turntable · MK1 timecode")
                 Spacer()
                 Text(Self.pitch(deck.simulatedPitch))
                     .font(Theme.readoutSm)
@@ -225,7 +225,7 @@ struct DeckPanel: View {
 
     static func pitch(_ p: Double) -> String {
         // Speed relative to 33⅓ rpm, sign ignored (direction has its own readout).
-        String(format: "%+.2f%%", (abs(p) - 1) * 100)
+        abs(p) < 0.01 ? "Stopped" : String(format: "%+.2f%%", (abs(p) - 1) * 100)
     }
 
     static func db(_ level: Float) -> String {
