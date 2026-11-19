@@ -171,6 +171,17 @@ extension ContentView {
             spindleLog.notice("Field test: \(shown.count) tracks with energy ≥ 5; groups by Tags: " + groups.map { g in
                 "\(g.options.map(\.name).joined(separator: "+").isEmpty ? g.title : g.options.map(\.name).joined(separator: "+")) (\(g.records.count))" }.joined(separator: ", "))
         }
+        // Stack test: queue five tracks, Next on deck B; queue restored at the end.
+        let savedStack = model.stack
+        let savedTab = model.mixTab
+        if tracks.count > 9 {
+            model.stack = []
+            model.addToStack(tracks[3..<8].map(\.url))
+            model.next(deck: model.decks[1])
+            try? await Task.sleep(for: .seconds(1))
+            spindleLog.notice("Stack test: deck B \(model.decks[1].track?.title ?? "-"), queue \(model.stack.count), played \(model.played.count)")
+            if let first = model.library.playlists.playlists.first { model.mixTab = first.node.id.uuidString }
+        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -193,6 +204,9 @@ extension ContentView {
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
+        model.stack = savedStack
+        model.played = []
+        model.mixTab = savedTab
         if !testTags.isEmpty || !testFields.isEmpty {
             model.library.selectAll()
             for id in testTags { model.library.tags.delete(id) }

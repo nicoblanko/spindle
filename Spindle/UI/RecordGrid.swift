@@ -19,6 +19,10 @@ struct RecordGrid: View {
     /// Green dot on the name: mixes with the selected track.
     let mixes: (Record) -> Bool
     let menu: (Set<URL>) -> AnyView
+    /// Selected tracks (Organize and Mix keep their own).
+    var selection: Binding<Set<URL>>? = nil
+    /// Double-click: by default load into the free deck.
+    var onOpen: ((Record) -> Void)? = nil
     @State private var anchor: URL?
     @State private var addingField = false
     @State private var managing: FieldRef?
@@ -27,7 +31,10 @@ struct RecordGrid: View {
     @State private var deleting: CustomField?
 
     private var context: RecordContext { model.records }
-    private var selection: Set<URL> { model.organizeSelection }
+    private var selected: Set<URL> {
+        get { selection?.wrappedValue ?? model.organizeSelection }
+        nonmutating set { if let selection { selection.wrappedValue = newValue } else { model.organizeSelection = newValue } }
+    }
 
     private var columns: [FieldRef] { context.orderedFields(view).filter { !view.hidden.contains($0) } }
 
@@ -234,7 +241,7 @@ struct RecordGrid: View {
     }
 
     private func row(_ r: Record) -> some View {
-        let selected = selection.contains(r.id)
+        let isSelected = selected.contains(r.id)
         return HStack(spacing: 0) {
             Text("\(r.index)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint).frame(width: 36)
             ForEach(columns, id: \.self) { f in
@@ -247,27 +254,29 @@ struct RecordGrid: View {
             Spacer(minLength: 0)
         }
         .frame(height: 30)
-        .background(selected ? Theme.accentSoft : Theme.panel)
+        .background(isSelected ? Theme.accentSoft : Theme.panel)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.5)).frame(height: 1) }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { Task { await model.load(url: r.id, into: model.freeDeck) } }
+        .onTapGesture(count: 2) {
+            if let onOpen { onOpen(r) } else { Task { await model.load(url: r.id, into: model.freeDeck) } }
+        }
         .onTapGesture { click(r) }
         .draggable(r.track.url)
-        .contextMenu { menu(selection.contains(r.id) ? selection : [r.id]) }
+        .contextMenu { menu(selected.contains(r.id) ? selected : [r.id]) }
     }
 
     private func click(_ r: Record) {
         let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
-            var s = selection
+            var s = selected
             if s.contains(r.id) { s.remove(r.id) } else { s.insert(r.id) }
-            model.organizeSelection = s
+            selected = s
             anchor = r.id
         } else if flags.contains(.shift), let anchor, let a = flat.firstIndex(where: { $0.id == anchor }),
                   let b = flat.firstIndex(where: { $0.id == r.id }) {
-            model.organizeSelection = Set(flat[min(a, b)...max(a, b)].map(\.id))
+            selected = Set(flat[min(a, b)...max(a, b)].map(\.id))
         } else {
-            model.organizeSelection = [r.id]
+            selected = [r.id]
             anchor = r.id
         }
     }

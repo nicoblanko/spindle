@@ -133,6 +133,27 @@ final class AppModel {
         didSet { organizeView.save() }
     }
     var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep) }
+    /// The Mix page's queue ("Up next"), remembered between launches.
+    var stack: [StackItem] = StackItem.load() {
+        didSet { StackItem.save(stack) }
+    }
+    /// The stack card on each deck (A, B).
+    var deckCards: [StackItem?] = [nil, nil]
+    /// Cards already played this session, newest first.
+    var played: [StackItem] = []
+    /// Mix page: selected tab (playlist id, or "all") and each tab's view.
+    var mixTab: String = UserDefaults.standard.string(forKey: "mix.tab") ?? "all" {
+        didSet { UserDefaults.standard.set(mixTab, forKey: "mix.tab") }
+    }
+    var mixTabViews: [String: ViewSettings] = {
+        guard let data = UserDefaults.standard.data(forKey: "mix.tabViews"),
+              let v = try? JSONDecoder().decode([String: ViewSettings].self, from: data) else { return [:] }
+        return v
+    }() {
+        didSet { if let data = try? JSONEncoder().encode(mixTabViews) { UserDefaults.standard.set(data, forKey: "mix.tabViews") } }
+    }
+    var mixSelection = Set<URL>()
+
     /// Saved views (templates of filter, group, sort and hidden fields).
     var savedViews: [SavedView] = SavedView.loadAll() {
         didSet { SavedView.saveAll(savedViews) }
@@ -284,7 +305,7 @@ final class AppModel {
         running = false
     }
 
-    func load(url: URL, into deck: DeckModel) async {
+    func load(url: URL, into deck: DeckModel, fromStack: Bool = false) async {
         spindleLog.notice("Loading \(url.lastPathComponent) into deck \(deck.label)")
         deck.loading = true
         deck.error = nil
@@ -298,6 +319,7 @@ final class AppModel {
             if let old { retire(old.samples) }
             applyClip(track.url, to: deck)
             setPlaying(false, deck: deck)
+            if !fromStack { noteLoaded(url, deck: deck) }
             spindleLog.notice("Deck \(deck.label) loaded \(track.title), \(track.duration) s, engine \(self.engine == nil ? "off" : "on")")
         } catch {
             spindleLog.error("Deck \(deck.label) failed: \(error.localizedDescription)")
