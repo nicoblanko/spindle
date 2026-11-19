@@ -17,9 +17,13 @@ struct PrepView: View {
     var body: some View {
         HStack(spacing: 1) {
             CrateList(library: library, model: model)
-                .frame(width: 180)
-            PrepTrackList(library: library, model: model, page: page)
-                .frame(width: 360)
+                .frame(width: 200)
+            SharedTrackList(model: model, library: library, key: "prep",
+                            selection: Binding(get: { page.selected.map { [$0] } ?? [] },
+                                               set: { if let url = $0.first { model.selectForPrep(url) } }),
+                            onOpen: { model.selectForPrep($0.id) },
+                            nameWidth: 220)
+                .frame(width: 520)
             editor
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -40,73 +44,6 @@ struct PrepView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.panel)
         }
-    }
-}
-
-private struct PrepTrackList: View {
-    @Bindable var library: LibraryModel
-    let model: AppModel
-    let page: PrepPageModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Theme.space2) {
-                LabelText(library.selectionName)
-                Spacer()
-                if model.preparing > 0 {
-                    Text("Suggesting cues… \(model.preparing)").font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                }
-                Text("\(library.visibleTracks.filter { model.prep.prep(for: $0.url)?.mixReady == true }.count)/\(library.visibleTracks.count) ready")
-                    .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
-            }
-            .padding(.horizontal, Theme.space3)
-            .frame(height: 34)
-            .background(Theme.panelRaised)
-            TextField("Search", text: $library.search)
-                .textFieldStyle(.roundedBorder)
-                .padding(Theme.space2)
-                .background(Theme.panelRaised)
-            Rectangle().fill(Theme.line).frame(height: 1)
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(library.visibleTracks) { track in
-                        row(track)
-                        Rectangle().fill(Theme.line).frame(height: 1)
-                    }
-                }
-            }
-        }
-        .background(Theme.panel)
-    }
-
-    private func row(_ track: LibraryTrack) -> some View {
-        let selected = page.selected == track.url
-        let prep = model.prep.prep(for: track.url)
-        let analysis = model.analysis.analysis(for: track.url)
-        return Button {
-            model.selectForPrep(track.url)
-        } label: {
-            HStack(spacing: Theme.space2) {
-                Image(systemName: prep?.mixReady == true ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(prep?.mixReady == true ? Theme.match : Theme.inkFaint)
-                Text(track.name).font(Theme.body).lineLimit(1)
-                    .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
-                Spacer()
-                CueDots(prep: prep)
-                if let bpm = prep?.bpm ?? analysis?.bpm {
-                    Text(String(format: "%.1f", bpm)).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
-                        .frame(width: 42, alignment: .trailing)
-                }
-                KeyChip(analysis: analysis, showMood: false)
-                    .frame(width: 36, alignment: .leading)
-            }
-            .padding(.horizontal, Theme.space3)
-            .padding(.vertical, 5)
-            .background(selected ? Theme.accentSoft : Color.clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -175,7 +112,7 @@ private struct PrepEditor: View {
                 HStack(spacing: Theme.space3) {
                     Text(String(format: "%.2f BPM", prep.bpm)).font(Theme.readoutSm)
                     if let a = model.analysis.analysis(for: url) {
-                        KeyChip(analysis: a)
+                        Text("\(a.camelotNumber) \(KeyStyle.mood(minor: a.keyMinor))").font(Theme.readoutSm)
                         Text("E\(a.energy)").font(Theme.readoutSm)
                     }
                     Text("Cursor \(Self.clock(page.cursor)) · bar \(Int((prep.beatIndex(at: page.cursor) / 4).rounded(.down)) + 1)")

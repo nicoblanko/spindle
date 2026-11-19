@@ -79,10 +79,6 @@ struct OrganizeView: View {
         records.map { OrganizeRow(track: $0.track, analysis: $0.analysis, index: $0.index) }
     }
 
-    /// The track the right-hand panel talks about.
-    private var focused: URL? {
-        selection.count == 1 ? selection.first : rows.first { selection.contains($0.id) }?.id
-    }
 
     var body: some View {
         HStack(spacing: 1) {
@@ -249,9 +245,10 @@ struct OrganizeView: View {
     }
 
     private var grid: some View {
+        let recs = records
         return RecordGrid(
             model: model,
-            records: records,
+            records: recs,
             view: viewBinding,
             mixes: { _ in false },
             menu: { AnyView(contextMenu($0)) },
@@ -271,7 +268,7 @@ struct OrganizeView: View {
                     Text("Drag tracks here from All tracks, or files and folders from Finder, or use Add files….")
                         .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                 }
-            } else if records.isEmpty && !model.organizeView.conditions.isEmpty {
+            } else if recs.isEmpty && !model.organizeView.conditions.isEmpty {
                 VStack(spacing: Theme.space2) {
                     Text("No tracks match the filter").font(Theme.body).foregroundStyle(Theme.inkMuted)
                     Button("Clear filter") { model.organizeView.conditions = [] }.buttonStyle(FlatButtonStyle())

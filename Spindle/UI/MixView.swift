@@ -14,11 +14,41 @@ import SwiftUI
 struct MixView: View {
     let model: AppModel
     @Bindable var library: LibraryModel
+    @AppStorage("mix.dimUnfit") private var dimUnfit = true
+
+    /// Fits a playing deck: compatible key and tempo within 6% (half and
+    /// double time count). With nothing playing, everything fits.
+    private func fits(_ url: URL) -> Bool {
+        let playing = model.decks.filter { $0.playing && $0.track != nil && $0.track?.url != url }
+        guard !playing.isEmpty, let clip = model.analysis.analysis(for: url) else { return true }
+        let bpm = model.bpm(of: url) ?? clip.bpm
+        return playing.contains { deck in
+            guard let a = model.analysis.analysis(for: deck.track!.url), let live = model.liveBPM(deck) else { return false }
+            return Compatibility.keys(a, clip) && Compatibility.tempo(live, bpm, tolerance: 0.06)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ClipGrid(model: model, library: library)
-                .frame(maxHeight: .infinity)
+            HStack(spacing: 1) {
+                CrateList(library: library, model: model)
+                    .frame(width: 200)
+                VStack(spacing: 0) {
+                    SharedTrackList(model: model, library: library, key: "mix",
+                                    selection: Binding(get: { model.mixSelection }, set: { model.mixSelection = $0 }),
+                                    dimmed: dimUnfit ? { !fits($0.id) } : nil,
+                                    trailing: AnyView(
+                                        Toggle("Dim what doesn't fit", isOn: $dimUnfit)
+                                            .toggleStyle(.checkbox)
+                                            .font(Theme.caption)
+                                            .foregroundStyle(Theme.inkMuted)
+                                            .help("Grey out tracks whose key or tempo doesn't fit a playing deck")))
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    LoadBar(model: model, fits: fits)
+                }
+            }
+            .background(Theme.line)
+            .frame(maxHeight: .infinity)
             Rectangle().fill(Theme.line).frame(height: 1)
             HStack(spacing: 1) {
                 ForEach(model.decks) { deck in
@@ -71,245 +101,83 @@ private struct LaptopMixer: View {
     }
 }
 
-// MARK: Clip grid
+// MARK: Load bar
 
-private struct ClipGrid: View {
+/// The one place tracks are loaded from: the selected track, why it fits,
+/// its cues, and Load A / Load B. (Double-click loads into the free deck;
+/// tracks can also be dragged onto a deck.)
+private struct LoadBar: View {
     let model: AppModel
-    @Bindable var library: LibraryModel
-    @State private var onlyMatches = false
-    @State private var onlyReady = false
-    @AppStorage("mix.columns") private var columnSource = "playlists"
-    @AppStorage("mix.groupField") private var groupFieldData = ""
-
-    /// The field the columns are grouped by when Columns is "Field".
-    private var groupField: FieldRef {
-        get {
-            (try? JSONDecoder().decode(FieldRef.self, from: Data(groupFieldData.utf8))) ?? .tempoGroup
-        }
-        nonmutating set {
-            groupFieldData = (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        }
-    }
-
-    private struct Column: Identifiable {
-        let id: String
-        let title: String
-        let tracks: [LibraryTrack]
-        /// Playlists keep their own order; folders are sorted by tempo.
-        let ordered: Bool
-    }
-
-    private var usePlaylists: Bool { columnSource == "playlists" && !library.playlists.playlists.isEmpty }
-
-    private var columns: [Column] {
-        if columnSource == "field" {
-            let ctx = model.records
-            let records = library.allTracks.enumerated().map {
-                Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1)
-            }
-            return ctx.group(records, by: groupField).map { g in
-                let title = g.options.isEmpty ? g.title : g.options.map(\.name).joined(separator: " + ")
-                return Column(id: g.id, title: title, tracks: g.records.map(\.track), ordered: false)
-            }
-        }
-        if usePlaylists {
-            return library.playlists.playlists.map { item in
-                Column(id: item.node.id.uuidString, title: item.path,
-                       tracks: library.tracks(inPlaylist: item.node.id), ordered: true)
-            }
-        }
-        return library.crates.map { crate in
-            Column(id: crate, title: crate, tracks: library.tracks.filter { $0.crate == crate }, ordered: false)
-        }
-    }
+    let fits: (URL) -> Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Rectangle().fill(Theme.line).frame(height: 1)
-            GeometryReader { geo in
-                // Columns share the width (at least 200 pt each), from the left.
-                let count = max(columns.count, 1)
-                let width = min(340, max(200, (geo.size.width - CGFloat(count - 1)) / CGFloat(count)))
-                ScrollView([.horizontal, .vertical]) {
-                    HStack(alignment: .top, spacing: 1) {
-                        ForEach(columns) { col in
-                            column(col).frame(width: width)
-                        }
-                    }
-                    .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .topLeading)
-                    .background(Theme.line)
+        let url = model.mixSelection.first
+        HStack(spacing: Theme.space4) {
+            if let url {
+                let a = model.analysis.analysis(for: url)
+                let prep = model.prep.prep(for: url)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(url.deletingPathExtension().lastPathComponent).font(Theme.title).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(a.map { "\(String(format: "%.1f", prep?.bpm ?? $0.bpm)) · \($0.camelotNumber) \(KeyStyle.mood(minor: $0.keyMinor)) · E\($0.energy) · \(OrganizeView.length($0.duration))" } ?? "Not analysed yet")
+                        .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
                 }
+                .frame(width: 320, alignment: .leading)
+                cueLine(prep, duration: a?.duration ?? 1)
+                Text(reason(url)).font(Theme.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                    .frame(width: 220, alignment: .leading)
+            } else {
+                Text("Select a track to load it. Double-click loads into the free deck; you can also drag a track onto a deck.")
+                    .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                Spacer()
             }
-            .background(Theme.bg)
-        }
-    }
-
-    private var toolbar: some View {
-        HStack(spacing: Theme.space3) {
-            LabelText("Clips")
             ForEach(model.decks) { deck in
-                if let bpm = model.liveBPM(deck), deck.track != nil {
-                    HStack(spacing: Theme.space1) {
-                        Circle().fill(deck.color).frame(width: 6, height: 6)
-                        Text("\(deck.label) \(String(format: "%.1f", bpm))\(model.analysis.analysis(for: deck.track!.url).map { " · \($0.camelotNumber) \(KeyStyle.mood(minor: $0.keyMinor))" } ?? "")\(deck.playing ? "" : " · stopped")")
-                            .font(Theme.readoutSm)
-                            .foregroundStyle(deck.playing ? Theme.ink : Theme.inkFaint)
-                    }
+                Button {
+                    if let url { Task { await model.load(url: url, into: deck) } }
+                } label: {
+                    Text("Load \(deck.label)")
+                        .font(Theme.label)
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 70, height: 26)
+                        .background(Theme.control)
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(deck.color, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
                 }
+                .buttonStyle(.plain)
+                .disabled(url == nil)
             }
-            Spacer()
-            Picker("Columns", selection: $columnSource) {
-                Text("Playlists").tag("playlists")
-                Text("Music folders").tag("folders")
-                Text("Field").tag("field")
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 280)
-            .help("What the columns show: your playlists, your music folders, or one column per value of a field")
-            if columnSource == "field" {
-                Picker("", selection: Binding(get: { groupField }, set: { groupField = $0 })) {
-                    ForEach(model.records.allFields.filter { $0 != .name && $0 != .length }, id: \.self) {
-                        Text(model.records.name($0)).tag($0)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 140)
-                .help("One column per value of this field")
-            }
-            Toggle("Matches only", isOn: $onlyMatches).toggleStyle(.checkbox)
-            Toggle("Mix-ready only", isOn: $onlyReady).toggleStyle(.checkbox)
-            TextField("Search", text: $library.search)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 200)
         }
-        .font(Theme.caption)
-        .foregroundStyle(Theme.inkMuted)
         .padding(.horizontal, Theme.space3)
-        .frame(height: 34)
+        .frame(height: 56)
         .background(Theme.panelRaised)
     }
 
-    private func clips(in col: Column) -> [LibraryTrack] {
-        let filtered = col.tracks.filter { track in
-            (library.search.isEmpty || track.name.localizedCaseInsensitiveContains(library.search))
-                && (!onlyReady || model.prep.prep(for: track.url)?.mixReady == true)
-                && (!onlyMatches || !matchingDecks(track.url).isEmpty)
-        }
-        guard !col.ordered else { return filtered }
-        // Folders: sort by tempo so neighbours mix.
-        return filtered.sorted { a, b in
-            (model.analysis.analysis(for: a.url)?.bpm ?? 0) < (model.analysis.analysis(for: b.url)?.bpm ?? 0)
-        }
-    }
-
-    private func column(_ col: Column) -> some View {
-        let items = clips(in: col)
-        return VStack(spacing: 1) {
-            HStack {
-                if col.ordered { Image(systemName: "music.note.list").font(.system(size: 10)).foregroundStyle(Theme.inkMuted) }
-                Text(col.title).font(Theme.label).foregroundStyle(Theme.ink).lineLimit(1)
-                Spacer()
-                Text("\(items.count)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
-            }
-            .padding(.horizontal, Theme.space2)
-            .frame(height: 26)
-            .background(Theme.panelRaised)
-            ForEach(items) { track in
-                ClipCell(track: track, model: model, matches: matchingDecks(track.url))
-            }
-            if items.isEmpty {
-                Text(col.ordered && col.tracks.isEmpty ? "Empty playlist: add tracks on the Organize page." : "No clips match the filters.")
-                    .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                    .padding(Theme.space2)
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.panel)
-    }
-
-    /// Decks this clip would mix with: playing, compatible key, tempo within 6%.
-    private func matchingDecks(_ url: URL) -> [DeckModel] {
-        guard let clip = model.analysis.analysis(for: url) else { return [] }
-        return model.decks.filter { deck in
-            guard deck.playing, let track = deck.track, track.url != url,
-                  let playing = model.analysis.analysis(for: track.url),
-                  let live = model.liveBPM(deck) else { return false }
-            let clipBPM = model.prep.prep(for: url)?.bpm ?? clip.bpm
-            // Half/double time counts too.
-            let ratio = [clipBPM, clipBPM * 2, clipBPM / 2].map { abs($0 - live) / live }.min() ?? 1
-            return Compatibility.keys(playing, clip) && ratio < 0.06
-        }
-    }
-}
-
-private struct ClipCell: View {
-    let track: LibraryTrack
-    let model: AppModel
-    let matches: [DeckModel]
-    @State private var hovering = false
-
-    var body: some View {
-        let analysis = model.analysis.analysis(for: track.url)
-        let prep = model.prep.prep(for: track.url)
-        let selected = model.highlightedClip == track.url
-        let loadedOn = model.decks.first { $0.track?.url == track.url }
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: Theme.space1) {
-                if let loadedOn {
-                    Text(loadedOn.label).font(Theme.label).foregroundStyle(Theme.onAccent)
-                        .padding(.horizontal, 3).background(loadedOn.color)
-                }
-                Text(track.name).font(Theme.caption).foregroundStyle(Theme.ink).lineLimit(1)
-                Spacer(minLength: 0)
-                if prep?.mixReady == true {
-                    Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.match)
+    /// The four cues as ticks on a line through the track.
+    private func cueLine(_ prep: TrackPrep?, duration: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Theme.line).frame(height: 2)
+                ForEach(prep?.cues ?? [], id: \.role) { cue in
+                    Rectangle().fill(cue.role.color).frame(width: 2, height: 14)
+                        .offset(x: CGFloat(cue.time / max(duration, 1)) * geo.size.width)
+                        .help("\(cue.role.rawValue) \(cue.role.name)")
                 }
             }
-            HStack(spacing: Theme.space2) {
-                Text(analysis.map { String(format: "%.0f", prep?.bpm ?? $0.bpm) } ?? "—").font(Theme.readoutSm)
-                KeyChip(analysis: analysis)
-                Text(analysis.map { "E\($0.energy)" } ?? "").font(Theme.readoutSm)
-                Spacer(minLength: 0)
-                CueDots(prep: prep)
-            }
-            .foregroundStyle(Theme.inkMuted)
-            if let fx = prep?.fx, !fx.isEmpty {
-                Text(fx.summary).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).lineLimit(1)
-            }
-            if hovering {
-                HStack(spacing: Theme.space1) {
-                    ForEach(model.decks) { deck in
-                        Button("→ \(deck.label)") { load(deck) }
-                            .font(Theme.label)
-                            .buttonStyle(.plain)
-                            .foregroundStyle(deck.color)
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Theme.control)
-                    }
-                }
-            }
+            .frame(maxHeight: .infinity)
         }
-        .padding(.horizontal, Theme.space2)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Theme.accentSoft : (hovering ? Theme.panelRaised : Theme.panel))
-        .overlay {
-            // Match outline in the matching deck's colour (both: split).
-            if let first = matches.first {
-                Rectangle().strokeBorder(matches.count > 1 ? Theme.match : first.color, lineWidth: 2)
-            }
-        }
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { load(model.freeDeck) }
-        .onTapGesture { model.highlightedClip = track.url }
-        .help(matches.isEmpty ? track.name : "\(track.name) — mixes with deck \(matches.map(\.label).joined(separator: " and "))")
+        .frame(height: 18)
     }
 
-    private func load(_ deck: DeckModel) {
-        model.highlightedClip = track.url
-        Task { await model.load(url: track.url, into: deck) }
+    /// "Lift from deck A · −0.8%", or why it doesn't fit.
+    private func reason(_ url: URL) -> String {
+        guard let clip = model.analysis.analysis(for: url) else { return "" }
+        let bpm = model.bpm(of: url) ?? clip.bpm
+        for deck in model.decks where deck.playing {
+            guard let t = deck.track, t.url != url, let a = model.analysis.analysis(for: t.url), let live = model.liveBPM(deck) else { continue }
+            let ratio = [bpm, bpm * 2, bpm / 2].map { $0 / live - 1 }.min { abs($0) < abs($1) } ?? 0
+            let move = MixRelation.between(a, clip)?.title ?? "Key clash"
+            return "\(move) after deck \(deck.label) · " + String(format: "%+.1f%%", ratio * 100)
+        }
+        return fits(url) ? "Nothing playing" : ""
     }
 }
 

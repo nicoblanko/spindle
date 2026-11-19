@@ -73,6 +73,19 @@ extension ContentView {
         let original = model.page
         try? await Task.sleep(for: .seconds(4))
         let tracks = model.library.tracks
+        // Speed check: building the Organize list with the current view.
+        do {
+            let base = model.library.allTracks.enumerated().map {
+                Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1)
+            }
+            let t0 = Date()
+            for _ in 0..<20 {
+                let r = model.records.apply(model.organizeView, to: base)
+                if let g = model.organizeView.groupBy { _ = model.records.group(r, by: g) }
+            }
+            spindleLog.notice(String(format: "Speed check: list with current view %.2f ms per build (%d tracks)",
+                                     Date().timeIntervalSince(t0) * 1000 / 20, base.count))
+        }
         if tracks.count > 1 {
             await model.load(url: tracks[0].url, into: model.decks[0])
             await model.load(url: tracks[1].url, into: model.decks[1])

@@ -18,13 +18,14 @@ All four pages work:
   (tags incl. partial ones, sets, rating, notes, prep). Keys are written
   as a number and mood ("8 Dark"); tracks already in the open set are
   greyed in the list.
-- **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
+- **Prep:** the shared sidebar and track list; suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.
-- **Mix:** clip grid above the two decks; columns are playlists, music
-  folders, or one column per value of any field. Clips that mix with a
-  playing deck (key and tempo) are outlined in its colour. Cue pads, beat
-  loops, filter and echo per deck.
+- **Mix:** the same sidebar and track list as Organize (its own columns
+  and filters) above the two decks. Tracks that don't fit a playing deck
+  (key and tempo) can be dimmed; a fixed bar shows the selected track,
+  its cues and why it fits, with Load A / Load B. Cue pads, beat loops,
+  filter and echo per deck.
 - **Sessions:** records the mix (the mixer's master send or Spindle's own
   output) to 24-bit WAV with an automatic tracklist; export to WAV,
   MP3 (320 kbps, via LAME) or AAC, copy or save the tracklist.

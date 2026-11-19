@@ -25,6 +25,8 @@ struct RecordGrid: View {
     var onOpen: ((Record) -> Void)? = nil
     /// Rows drawn greyed (e.g. already in the open set).
     var dimmed: ((Record) -> Bool)? = nil
+    /// Width of the Track column (narrower on Prep).
+    var nameWidth: CGFloat = 300
     @State private var anchor: URL?
     @State private var addingField = false
     @State private var managing: FieldRef?
@@ -33,6 +35,20 @@ struct RecordGrid: View {
     @State private var deleting: CustomField?
 
     private var context: RecordContext { model.records }
+    /// Option lists for this redraw (each cell used to rebuild them).
+    @State private var optionCache = OptionCache()
+
+    final class OptionCache {
+        var map: [FieldRef: [OptionInfo]] = [:]
+        func get(_ f: FieldRef, _ make: () -> [OptionInfo]) -> [OptionInfo] {
+            if let v = map[f] { return v }
+            let v = make()
+            map[f] = v
+            return v
+        }
+    }
+
+    private func options(_ f: FieldRef) -> [OptionInfo] { optionCache.get(f) { context.options(f) } }
     private var selected: Set<URL> {
         get { selection?.wrappedValue ?? model.organizeSelection }
         nonmutating set { if let selection { selection.wrappedValue = newValue } else { model.organizeSelection = newValue } }
@@ -42,7 +58,7 @@ struct RecordGrid: View {
 
     private func width(_ f: FieldRef) -> CGFloat {
         switch f {
-        case .name: 300
+        case .name: nameWidth
         case .folder: 100
         case .bpm: 58
         case .key: 86
@@ -78,6 +94,7 @@ struct RecordGrid: View {
     }
 
     var body: some View {
+        let _ = optionCache.map.removeAll(keepingCapacity: true)
         GeometryReader { geo in
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
@@ -303,7 +320,7 @@ struct RecordGrid: View {
                 .opacity(r.analysis.map { $0.keyConfidence < 0.02 ? 0.55 : 1 } ?? 1)
         case .mood:
             if let a = r.analysis {
-                let o = context.options(.mood).first { $0.id == (a.keyMinor ? "A" : "B") }!
+                let o = options(.mood).first { $0.id == (a.keyMinor ? "A" : "B") }!
                 Pill(name: o.name, color: o.color)
             }
         case .energy:
@@ -315,13 +332,14 @@ struct RecordGrid: View {
         case .length:
             Text(r.analysis.map { OrganizeView.length($0.duration) } ?? "—").font(Theme.readoutSm).foregroundStyle(Theme.ink)
         case .tempoGroup:
-            pills(context.options(.tempoGroup).filter { context.optionKeys(r, .tempoGroup).contains($0.id) })
+            let keys = context.optionKeys(r, .tempoGroup)
+            pills(options(.tempoGroup).filter { keys.contains($0.id) })
         case .mixReady:
             checkbox(context.checked(r, .mixReady), enabled: model.prep.prep(for: r.id) != nil) { on in
                 model.prep.update(r.id) { $0.mixReady = on }
             }
         case .tags:
-            SelectCell(options: context.options(.tags), selected: context.optionKeys(r, .tags), multi: true,
+            SelectCell(options: options(.tags), selected: context.optionKeys(r, .tags), multi: true,
                        onToggle: { id in
                            guard let uuid = UUID(uuidString: id) else { return }
                            let has = model.library.tags.ids(for: r.path).contains(uuid)
@@ -343,7 +361,7 @@ struct RecordGrid: View {
             switch field.type {
             case .multiSelect, .singleSelect:
                 let multi = field.type == .multiSelect
-                SelectCell(options: context.options(.custom(id)), selected: context.optionKeys(r, .custom(id)), multi: multi,
+                SelectCell(options: options(.custom(id)), selected: context.optionKeys(r, .custom(id)), multi: multi,
                            onToggle: { option in
                                guard let uuid = UUID(uuidString: option) else { return }
                                var ids: [UUID] = { if case .options(let x)? = model.fields.value(r.path, id) { return x }; return [] }()

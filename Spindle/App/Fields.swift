@@ -483,24 +483,36 @@ struct RecordContext {
             }
         }
         if let field = view.sortField {
-            result.sort { a, b in
-                let less = compare(a, b, field)
-                return view.sortAscending ? less : compare(b, a, field)
+            // Work out each record's sort key once (comparing on the fly
+            // rebuilt option lists hundreds of times per redraw).
+            enum Key { case text(String), number(Double), select(Int, Int), check(Bool) }
+            let order: [String: Int]
+            switch kind(field) {
+            case .select, .multi: order = Dictionary(uniqueKeysWithValues: options(field).enumerated().map { ($1.id, $0) })
+            default: order = [:]
             }
+            let keyed: [(Record, Key)] = result.map { r in
+                switch kind(field) {
+                case .text: return (r, .text(text(r, field) ?? ""))
+                case .number: return (r, .number(number(r, field) ?? -.infinity))
+                case .checkbox: return (r, .check(checked(r, field)))
+                case .select, .multi:
+                    let k = optionKeys(r, field).compactMap { order[$0] }
+                    return (r, .select(k.first ?? Int.max, k.count))
+                }
+            }
+            func less(_ x: Key, _ y: Key) -> Bool {
+                switch (x, y) {
+                case let (.text(a), .text(b)): return a.localizedStandardCompare(b) == .orderedAscending
+                case let (.number(a), .number(b)): return a < b
+                case let (.select(a1, a2), .select(b1, b2)): return (a1, a2) < (b1, b2)
+                case let (.check(a), .check(b)): return !a && b
+                default: return false
+                }
+            }
+            result = keyed.sorted { view.sortAscending ? less($0.1, $1.1) : less($1.1, $0.1) }.map(\.0)
         }
         return result
-    }
-
-    private func compare(_ a: Record, _ b: Record, _ ref: FieldRef) -> Bool {
-        switch kind(ref) {
-        case .text: return (text(a, ref) ?? "").localizedStandardCompare(text(b, ref) ?? "") == .orderedAscending
-        case .number: return (number(a, ref) ?? -.infinity) < (number(b, ref) ?? -.infinity)
-        case .checkbox: return !checked(a, ref) && checked(b, ref)
-        case .select, .multi:
-            let order = Dictionary(uniqueKeysWithValues: options(ref).enumerated().map { ($1.id, $0) })
-            let ka = optionKeys(a, ref).compactMap { order[$0] }, kb = optionKeys(b, ref).compactMap { order[$0] }
-            return (ka.first ?? Int.max, ka.count) < (kb.first ?? Int.max, kb.count)
-        }
     }
 
     // Grouping
