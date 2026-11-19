@@ -30,6 +30,9 @@ extension AppModel {
     func loadPreview(_ url: URL) {
         let rate = engine?.sampleRate ?? selectedDevice?.sampleRate ?? 48000
         Task {
+            // Moving through the list: only decode the track you stop on.
+            try? await Task.sleep(for: .milliseconds(200))
+            guard prepPage.selected == url else { return }
             guard let track = try? await TrackLoader.load(url: url, sampleRate: rate) else { return }
             guard prepPage.selected == url else { retire(track.samples); return }
             let old = prepPage.preview

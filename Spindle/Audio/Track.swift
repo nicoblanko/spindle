@@ -45,6 +45,9 @@ enum TrackLoadError: LocalizedError {
 }
 
 nonisolated enum TrackLoader {
+    /// Runs in the background (@concurrent), never on the caller's thread:
+    /// decoding a whole file takes up to a second.
+    @concurrent
     static func load(url: URL, sampleRate: Double) async throws -> LoadedTrack {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }

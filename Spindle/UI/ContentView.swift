@@ -69,6 +69,22 @@ extension ContentView {
     /// PNG (with a track loaded and a simulated record playing), then puts
     /// the page back. Used to check layouts without clicking through.
     func snapshotIfRequested() async {
+        if ProcessInfo.processInfo.environment["SPINDLE_PREPLAG"] != nil {
+            // Lag check: step through Prep's list like holding the down arrow.
+            try? await Task.sleep(for: .seconds(4))
+            model.page = .prep
+            try? await Task.sleep(for: .seconds(2))
+            spindleLog.notice("Lag check: start")
+            var worst = 0.0, last = Date()
+            for _ in 0..<40 {
+                model.prepStepTrack(1, in: model.pageRecords("prep").map(\.id))
+                try? await Task.sleep(for: .milliseconds(120))
+                let gap = Date().timeIntervalSince(last) - 0.12
+                worst = max(worst, gap); last = Date()
+            }
+            spindleLog.notice(String(format: "Lag check: worst main-thread delay %.0f ms", worst * 1000))
+            return
+        }
         guard let dir = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT"] else { return }
         let original = model.page
         try? await Task.sleep(for: .seconds(4))

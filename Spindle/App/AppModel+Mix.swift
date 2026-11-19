@@ -157,6 +157,8 @@ extension AppModel {
         loadPreview(url)
         let bpm = analysis.analysis(for: url)?.bpm
         Task {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard prepPage.selected == url else { return }
             let result = await Task.detached(priority: .userInitiated) {
                 Result { try PrepAnalyzer.suggest(url: url, bpm: bpm) }
             }.value
