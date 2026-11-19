@@ -133,6 +133,8 @@ final class AppModel {
     var preparing = 0
     /// The clip selected in the Mix grid (MIDI "load highlighted clip").
     var highlightedClip: URL?
+    /// Tracks selected on the Organize page.
+    var organizeSelection = Set<URL>()
     /// Remembered between launches.
     var page: Page = Page(rawValue: UserDefaults.standard.string(forKey: "page") ?? "") ?? .mix {
         didSet { UserDefaults.standard.set(page.rawValue, forKey: "page") }
@@ -147,7 +149,7 @@ final class AppModel {
     /// Scans the music folder, then analyses anything new.
     func refreshLibrary() async {
         await library.rescan()
-        await analysis.analyze(library.tracks.map(\.url))
+        await analysis.analyze(library.allTracks.map(\.url))
         await prepareAll()
     }
     /// The deck whose Load… button opened the file picker. There is one picker

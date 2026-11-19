@@ -2,9 +2,9 @@
 //  Library.swift
 //  Spindle
 //
-//  A minimal library for the prototype: every audio file under one music
-//  folder, grouped by its first subfolder ("crate"). Step 2 (Organize) will
-//  replace this with analysis and a proper database.
+//  The library: every audio file under the music folder, grouped by its
+//  first subfolder ("crate"), plus the playlists made in Spindle, which can
+//  hold files from anywhere.
 //
 
 import AppKit
@@ -29,16 +29,70 @@ final class LibraryModel {
     private(set) var folder: URL
     private(set) var tracks: [LibraryTrack] = []
     private(set) var scanning = false
-    var crate: String?          // nil = all crates
+    /// Selected folder crate (nil with no playlist selected = all tracks).
+    var crate: String? {
+        didSet { if crate != nil { playlist = nil } }
+    }
+    /// Selected playlist or playlist folder.
+    var playlist: UUID? {
+        didSet { if playlist != nil { crate = nil } }
+    }
     var search = ""
+    let playlists = PlaylistStore()
+
+    func selectAll() {
+        crate = nil
+        playlist = nil
+    }
+
+    /// Name of the current selection.
+    var selectionName: String {
+        if let node = playlists.node(playlist) { return playlists.path(of: node) }
+        return crate ?? "All tracks"
+    }
+
+    /// The playlist being shown, if a single playlist (not a folder) is selected.
+    var selectedPlaylist: PlaylistNode? {
+        playlists.node(playlist).flatMap { $0.isFolder ? nil : $0 }
+    }
+
+    /// A track by path: from the music folder, or (for playlist tracks from
+    /// elsewhere) with its own folder's name as crate.
+    func track(path: String) -> LibraryTrack {
+        if let known = byPath[path] { return known }
+        let url = URL(fileURLWithPath: path)
+        return LibraryTrack(url: url, crate: url.deletingLastPathComponent().lastPathComponent)
+    }
+
+    private var byPath: [String: LibraryTrack] = [:]
+
+    /// Tracks of a playlist, or of every playlist inside a folder, in order.
+    func tracks(inPlaylist id: UUID) -> [LibraryTrack] {
+        guard let node = playlists.node(id) else { return [] }
+        if !node.isFolder { return node.tracks.map(track(path:)) }
+        var seen = Set<String>()
+        var result: [LibraryTrack] = []
+        func walk(_ parent: UUID) {
+            for child in playlists.children(of: parent) {
+                if child.isFolder { walk(child.id) }
+                else { for p in child.tracks where seen.insert(p).inserted { result.append(track(path: p)) } }
+            }
+        }
+        walk(id)
+        return result
+    }
+
+    /// The music folder's tracks plus playlist tracks from elsewhere.
+    var allTracks: [LibraryTrack] {
+        let outside = playlists.allTrackPaths.filter { byPath[$0] == nil }.sorted().map(track(path:))
+        return tracks + outside
+    }
 
     var crates: [String] { Array(Set(tracks.map(\.crate))).sorted() }
 
     var visibleTracks: [LibraryTrack] {
-        tracks.filter { track in
-            (crate == nil || track.crate == crate)
-                && (search.isEmpty || track.name.localizedCaseInsensitiveContains(search))
-        }
+        let source = playlist.map(tracks(inPlaylist:)) ?? tracks.filter { crate == nil || $0.crate == crate }
+        return search.isEmpty ? source : source.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }
 
     init() {
@@ -54,6 +108,7 @@ final class LibraryModel {
         defer { scanning = false }
         let root = folder
         tracks = await Task.detached { Self.scan(root) }.value
+        byPath = Dictionary(tracks.map { ($0.url.path, $0) }, uniquingKeysWith: { a, _ in a })
         spindleLog.notice("Library: \(tracks.count) tracks in \(root.path)")
     }
 

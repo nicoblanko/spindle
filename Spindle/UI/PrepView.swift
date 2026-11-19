@@ -51,7 +51,7 @@ private struct PrepTrackList: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: Theme.space2) {
-                LabelText(library.crate ?? "All tracks")
+                LabelText(library.selectionName)
                 Spacer()
                 if model.preparing > 0 {
                     Text("Suggesting cues… \(model.preparing)").font(Theme.caption).foregroundStyle(Theme.inkFaint)
@@ -98,8 +98,8 @@ private struct PrepTrackList: View {
                     Text(String(format: "%.1f", bpm)).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
                         .frame(width: 42, alignment: .trailing)
                 }
-                Text(analysis?.camelot ?? "").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
-                    .frame(width: 28, alignment: .trailing)
+                KeyChip(analysis: analysis, showMood: false)
+                    .frame(width: 36, alignment: .leading)
             }
             .padding(.horizontal, Theme.space3)
             .padding(.vertical, 5)
@@ -175,7 +175,7 @@ private struct PrepEditor: View {
                 HStack(spacing: Theme.space3) {
                     Text(String(format: "%.2f BPM", prep.bpm)).font(Theme.readoutSm)
                     if let a = model.analysis.analysis(for: url) {
-                        Text(a.camelot).font(Theme.readoutSm)
+                        KeyChip(analysis: a)
                         Text("E\(a.energy)").font(Theme.readoutSm)
                     }
                     Text("Cursor \(Self.clock(page.cursor)) · bar \(Int((prep.beatIndex(at: page.cursor) / 4).rounded(.down)) + 1)")

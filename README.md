@@ -9,8 +9,12 @@ Resolve (Organize, Prep, Mix, Sessions).
 All four pages work:
 
 - **Organize:** library from a folder (subfolders are crates), analysis of
-  BPM, key (Camelot), energy, intro and outro type; compatibility filtering
-  and a key × energy map.
+  BPM, key, energy, intro and outro type. Keys are shown as a colour on a
+  12-colour wheel plus a mood (Dark = minor, Bright = major): neighbouring
+  colours mix well. For a selected track, "Good next tracks" lists what
+  mixes after it (same key, lift, drop, mood change). Playlists and
+  folders for sets, holding tracks from anywhere on disk; they can be the
+  Mix page's columns.
 - **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.

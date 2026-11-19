@@ -28,6 +28,7 @@ final class AnalysisStore {
     private(set) var failed: [String: String] = [:]
     private var stored: [String: StoredAnalysis] = [:]
     private var running = false
+    private var queued: [URL] = []
 
     nonisolated private static var fileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -48,9 +49,17 @@ final class AnalysisStore {
 
     /// Analyses every track that has no up-to-date result.
     func analyze(_ urls: [URL]) async {
-        guard !running else { return }
+        // Already busy: these get done when the current run finishes.
+        guard !running else { queued += urls; return }
         running = true
-        defer { running = false }
+        defer {
+            running = false
+            if !queued.isEmpty {
+                let next = queued
+                queued = []
+                Task { await analyze(next) }
+            }
+        }
         let todo = urls.filter { url in
             guard let s = stored[url.path], let sig = Self.signature(url) else { return true }
             return s.fileSize != sig.size || s.modified != sig.modified

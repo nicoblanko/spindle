@@ -6,8 +6,10 @@
 //  and the deck monitor the clip grid and session log use.
 //
 
+import AppKit
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 @Observable
 final class PrepPageModel {
@@ -23,11 +25,38 @@ final class PrepPageModel {
 }
 
 extension AppModel {
+    // MARK: Playlists
+
+    /// Adds files or folders (from anywhere) to a playlist, then analyses
+    /// and preps whatever is new.
+    func addToPlaylist(_ urls: [URL], playlist: UUID) {
+        let files = PlaylistStore.audioFiles(in: urls)
+        let added = library.playlists.add(files, to: playlist)
+        spindleLog.notice("Playlist: added \(added) of \(files.count) files")
+        guard added > 0 else { return }
+        Task {
+            await analysis.analyze(files)
+            await prepareAll()
+        }
+    }
+
+    /// Lets you pick files or folders anywhere and adds them to a playlist.
+    func chooseFilesForPlaylist(_ playlist: UUID) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.audio, .folder]
+        panel.prompt = "Add to playlist"
+        guard panel.runModal() == .OK else { return }
+        addToPlaylist(panel.urls, playlist: playlist)
+    }
+
     // MARK: Prep
 
     /// Suggests grid and cues for every track that has none yet.
     func prepareAll() async {
-        let todo = library.tracks.map(\.url).filter { prep.prep(for: $0) == nil }
+        let todo = library.allTracks.map(\.url).filter { prep.prep(for: $0) == nil }
         guard !todo.isEmpty else { return }
         preparing = todo.count
         spindleLog.notice("Prep: suggesting cues for \(todo.count) tracks")

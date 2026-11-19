@@ -98,6 +98,20 @@ extension ContentView {
             model.selectForPrep(tracks[0].url)
             model.highlightedClip = tracks[2 % tracks.count].url
         }
+        // Playlist test: a folder with a playlist holding library tracks and
+        // a file from outside the music folder; removed again at the end.
+        var testFolder: UUID?
+        if let outside = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_PLAYLIST"], tracks.count > 5 {
+            let store = model.library.playlists
+            let folder = store.create(name: "Test sets", folder: true, in: nil)
+            let list = store.create(name: "Warm-up", folder: false, in: folder)
+            _ = store.create(name: "Peak time", folder: false, in: folder)
+            model.addToPlaylist(tracks.prefix(5).map(\.url) + [URL(fileURLWithPath: outside)], playlist: list)
+            model.library.playlist = list
+            model.organizeSelection = [tracks[0].url]
+            testFolder = folder
+            try? await Task.sleep(for: .seconds(8))      // let the outside file be analysed
+        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -120,6 +134,10 @@ extension ContentView {
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
+        if let testFolder {
+            model.library.selectAll()
+            model.library.playlists.delete(testFolder)
+        }
         model.page = original
     }
 }

@@ -78,8 +78,29 @@ private struct ClipGrid: View {
     @Bindable var library: LibraryModel
     @State private var onlyMatches = false
     @State private var onlyReady = false
+    @AppStorage("mix.columns") private var columnSource = "playlists"
 
-    private var columns: [String] { library.crates }
+    private struct Column: Identifiable {
+        let id: String
+        let title: String
+        let tracks: [LibraryTrack]
+        /// Playlists keep their own order; folders are sorted by tempo.
+        let ordered: Bool
+    }
+
+    private var usePlaylists: Bool { columnSource == "playlists" && !library.playlists.playlists.isEmpty }
+
+    private var columns: [Column] {
+        if usePlaylists {
+            return library.playlists.playlists.map { item in
+                Column(id: item.node.id.uuidString, title: item.path,
+                       tracks: library.tracks(inPlaylist: item.node.id), ordered: true)
+            }
+        }
+        return library.crates.map { crate in
+            Column(id: crate, title: crate, tracks: library.tracks.filter { $0.crate == crate }, ordered: false)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -88,11 +109,11 @@ private struct ClipGrid: View {
             GeometryReader { geo in
                 // Columns share the width (at least 200 pt each), from the left.
                 let count = max(columns.count, 1)
-                let width = max(200, (geo.size.width - CGFloat(count - 1)) / CGFloat(count))
+                let width = min(340, max(200, (geo.size.width - CGFloat(count - 1)) / CGFloat(count)))
                 ScrollView([.horizontal, .vertical]) {
                     HStack(alignment: .top, spacing: 1) {
-                        ForEach(columns, id: \.self) { crate in
-                            column(crate).frame(width: width)
+                        ForEach(columns) { col in
+                            column(col).frame(width: width)
                         }
                     }
                     .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .topLeading)
@@ -110,13 +131,21 @@ private struct ClipGrid: View {
                 if let bpm = model.liveBPM(deck), deck.track != nil {
                     HStack(spacing: Theme.space1) {
                         Circle().fill(deck.color).frame(width: 6, height: 6)
-                        Text("\(deck.label) \(String(format: "%.1f", bpm))\(model.analysis.analysis(for: deck.track!.url).map { " · " + $0.camelot } ?? "")\(deck.playing ? "" : " · stopped")")
+                        Text("\(deck.label) \(String(format: "%.1f", bpm))\(model.analysis.analysis(for: deck.track!.url).map { " · \($0.camelotNumber) \(KeyStyle.mood(minor: $0.keyMinor))" } ?? "")\(deck.playing ? "" : " · stopped")")
                             .font(Theme.readoutSm)
                             .foregroundStyle(deck.playing ? Theme.ink : Theme.inkFaint)
                     }
                 }
             }
             Spacer()
+            Picker("Columns", selection: $columnSource) {
+                Text("Playlists").tag("playlists")
+                Text("Music folders").tag("folders")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+            .disabled(library.playlists.playlists.isEmpty)
+            .help(library.playlists.playlists.isEmpty ? "Make playlists on the Organize page to use them as columns" : "What the columns show")
             Toggle("Matches only", isOn: $onlyMatches).toggleStyle(.checkbox)
             Toggle("Mix-ready only", isOn: $onlyReady).toggleStyle(.checkbox)
             TextField("Search", text: $library.search)
@@ -130,24 +159,25 @@ private struct ClipGrid: View {
         .background(Theme.panelRaised)
     }
 
-    private func clips(in crate: String) -> [LibraryTrack] {
-        library.tracks.filter { track in
-            track.crate == crate
-                && (library.search.isEmpty || track.name.localizedCaseInsensitiveContains(library.search))
+    private func clips(in col: Column) -> [LibraryTrack] {
+        let filtered = col.tracks.filter { track in
+            (library.search.isEmpty || track.name.localizedCaseInsensitiveContains(library.search))
                 && (!onlyReady || model.prep.prep(for: track.url)?.mixReady == true)
                 && (!onlyMatches || !matchingDecks(track.url).isEmpty)
         }
-        .sorted { a, b in
-            // Sort by tempo so neighbours mix.
+        guard !col.ordered else { return filtered }
+        // Folders: sort by tempo so neighbours mix.
+        return filtered.sorted { a, b in
             (model.analysis.analysis(for: a.url)?.bpm ?? 0) < (model.analysis.analysis(for: b.url)?.bpm ?? 0)
         }
     }
 
-    private func column(_ crate: String) -> some View {
-        let items = clips(in: crate)
+    private func column(_ col: Column) -> some View {
+        let items = clips(in: col)
         return VStack(spacing: 1) {
             HStack {
-                Text(crate).font(Theme.label).foregroundStyle(Theme.ink).lineLimit(1)
+                if col.ordered { Image(systemName: "music.note.list").font(.system(size: 10)).foregroundStyle(Theme.inkMuted) }
+                Text(col.title).font(Theme.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer()
                 Text("\(items.count)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
             }
@@ -156,6 +186,11 @@ private struct ClipGrid: View {
             .background(Theme.panelRaised)
             ForEach(items) { track in
                 ClipCell(track: track, model: model, matches: matchingDecks(track.url))
+            }
+            if items.isEmpty {
+                Text(col.ordered && col.tracks.isEmpty ? "Empty playlist: add tracks on the Organize page." : "No clips match the filters.")
+                    .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    .padding(Theme.space2)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -202,7 +237,7 @@ private struct ClipCell: View {
             }
             HStack(spacing: Theme.space2) {
                 Text(analysis.map { String(format: "%.0f", prep?.bpm ?? $0.bpm) } ?? "—").font(Theme.readoutSm)
-                Text(analysis?.camelot ?? "").font(Theme.readoutSm)
+                KeyChip(analysis: analysis)
                 Text(analysis.map { "E\($0.energy)" } ?? "").font(Theme.readoutSm)
                 Spacer(minLength: 0)
                 CueDots(prep: prep)
