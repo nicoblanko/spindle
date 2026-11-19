@@ -83,7 +83,7 @@ final class PrepKeys {
 
     deinit { remove() }
 
-    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · C click · M mix-ready"
+    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · D bar 1 here · [ ] nudge grid · C click · M mix-ready"
     /// Key codes of the number keys 1–9.
     static let numberKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
@@ -136,7 +136,6 @@ private struct PrepEditor: View {
     let prep: TrackPrep
     let model: AppModel
     @Bindable var page: PrepPageModel
-    @State private var showGrid = false
     @State private var editingCue: UUID?
 
     var body: some View {
@@ -207,20 +206,10 @@ private struct PrepEditor: View {
 
             Spacer(minLength: Theme.space2)
 
-            Button { showGrid.toggle() } label: {
-                HStack(spacing: 4) {
-                    Text(String(format: "%.2f", prep.bpm)).font(Theme.readout)
-                    Text("BPM").font(Theme.caption).foregroundStyle(Theme.inkMuted)
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.inkMuted)
-                }
-                .foregroundStyle(Theme.ink)
-                .padding(.horizontal, Theme.space2).frame(height: 24)
-                .background(Theme.control)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            HStack(spacing: 4) {
+                Text(String(format: "%.2f", prep.bpm)).font(Theme.readout).foregroundStyle(Theme.ink)
+                Text("BPM").font(Theme.caption).foregroundStyle(Theme.inkMuted)
             }
-            .buttonStyle(.plain)
-            .help("Tempo and beatgrid")
-            .popover(isPresented: $showGrid, arrowEdge: .bottom) { gridPopover }
 
             Button { model.prepSetMetronome(!page.metronome) } label: {
                 Label("Click", systemImage: "metronome")
@@ -274,6 +263,8 @@ private struct PrepEditor: View {
             HStack(alignment: .top, spacing: 1) {
                 cueTools
                     .frame(maxWidth: .infinity)
+                gridTools
+                    .frame(width: 286)
                 loopTools
                     .frame(width: 420)
                 fxTools
@@ -434,38 +425,34 @@ private struct PrepEditor: View {
         .help("Set on the deck when this track is loaded. You hear them here while you set them.")
     }
 
-    // Tempo and grid, tucked away: Spindle snaps cues and loops to the grid,
-    // counts bars with it and syncs with it. Only fix it if the click is off.
+    // The beatgrid: Spindle snaps cues and loops to it, counts bars with it
+    // and syncs with it. Turn on Click to check it by ear.
 
-    private var gridPopover: some View {
-        VStack(alignment: .leading, spacing: Theme.space3) {
-            Text("The beatgrid marks every beat. Cues and loops snap to it, bars are counted from it and Sync uses it. Turn on Click: if the click drifts away from the kick the tempo is off; if it's steadily early or late, nudge it.")
-                .font(Theme.caption).foregroundStyle(Theme.inkMuted)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 4) {
+    private var gridTools: some View {
+        section("Beatgrid") {
+            Button("Detect again") { model.resuggest(url) }
+                .buttonStyle(SmallButtonStyle())
+                .help("Replaces the grid, cues and loop slots with a fresh suggestion. FX and mix-ready stay.")
+        } content: {
+            HStack(spacing: 3) {
                 Button("−") { model.prepEdit { $0.bpm -= 0.01 } }.help("−0.01 BPM")
-                Text(String(format: "%.2f", prep.bpm)).font(Theme.readout).foregroundStyle(Theme.ink).frame(width: 64)
+                Text(String(format: "%.2f", prep.bpm)).font(Theme.readout).foregroundStyle(Theme.ink).frame(width: 62)
                 Button("+") { model.prepEdit { $0.bpm += 0.01 } }.help("+0.01 BPM")
                 Button("−1") { model.prepEdit { $0.bpm -= 1 } }
                 Button("+1") { model.prepEdit { $0.bpm += 1 } }
                 Button("÷2") { model.prepEdit { $0.bpm /= 2 } }
                 Button("×2") { model.prepEdit { $0.bpm *= 2 } }
             }
-            HStack(spacing: 4) {
-                Button { model.prepEdit { $0.gridOffset -= 0.005 } } label: { Label("Earlier", systemImage: "chevron.left") }
-                    .help("[")
-                Button { model.prepEdit { $0.gridOffset += 0.005 } } label: { Label("Later", systemImage: "chevron.right") }
-                    .help("]")
+            HStack(spacing: 3) {
+                Button { model.prepEdit { $0.gridOffset -= 0.005 } } label: { Image(systemName: "chevron.left") }
+                    .help("Grid earlier ([)")
+                Button { model.prepEdit { $0.gridOffset += 0.005 } } label: { Image(systemName: "chevron.right") }
+                    .help("Grid later (])")
                 Button("Bar 1 here") { model.prepDownbeatHere() }
                     .help("The bar starts on the playhead (D)")
-                Spacer()
-                Button("Detect again") { model.resuggest(url) }
-                    .help("Replaces the grid, cues and loop slots with a fresh suggestion. FX and mix-ready stay.")
             }
         }
         .buttonStyle(SmallButtonStyle())
-        .padding(Theme.space3)
-        .frame(width: 360)
     }
 
     static func clock(_ s: Double) -> String {
