@@ -96,6 +96,26 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Jump the track to this time (seconds); NaN = none. The record keeps
     /// control: the track's offset to the record moves with the jump.
     var jumpRequest: Double = .nan
+    /// Scrolling while playing: the UI adds seconds here and the track
+    /// catches up over a few milliseconds by playing a little faster or
+    /// slower, like pushing a record, instead of jumping. Only the UI
+    /// writes `nudgeTotal`; only the audio thread writes `nudgeDone`.
+    var nudgeTotal: Double = 0
+    private var nudgeDone: Double = 0
+    /// What's still to come of the nudges sent so far.
+    var nudgePending: Double { nudgeTotal - nudgeDone }
+
+    /// A short crossfade from the old position after any jump, so it
+    /// doesn't click.
+    private static let fadeFrames = 240
+    private var fadeFrom: Double = 0
+    private var fadeLeft = 0
+
+    @inline(__always)
+    private func startFade(from old: Double) {
+        fadeFrom = old
+        fadeLeft = Self.fadeFrames
+    }
     var loopActive = false
     var loopStart: Double = 0
     var loopLength: Double = 0
@@ -246,6 +266,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         }
         if !jumpRequest.isNaN {
             let delta = jumpRequest - playhead
+            if abs(delta) > 0.002 { startFade(from: playhead) }
             playhead = jumpRequest
             trackOffset -= delta
             jumpRequest = .nan
@@ -270,6 +291,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             if absolute {
                 let error = position - playhead
                 if abs(error) > 0.15 {
+                    startFade(from: playhead)
                     playhead = position                  // needle drop
                 } else {
                     target += error * 2                  // pull gently into place
@@ -298,6 +320,20 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         let looping = loopActive && loopLength > 0.05
         let fxOn = effects.active
 
+        // Nudges: a big one jumps; otherwise most of what's pending is
+        // played out over this buffer as extra speed.
+        var pending = nudgeTotal - nudgeDone
+        if abs(pending) > 3 {
+            startFade(from: playhead)
+            playhead += pending
+            trackOffset -= pending
+            nudgeDone += pending
+            pending = 0
+        }
+        let take = pending * (1 - exp(-Double(frames) / (0.025 * sampleRate)))
+        nudgeDone += take
+        let nudgeStep = take / Double(max(frames, 1))
+
         for i in 0..<frames {
             let r = start + step * Double(i + 1)
             var outL: Float = 0, outR: Float = 0
@@ -306,6 +342,16 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 let x = playhead * t.sampleRate
                 outL = Self.hermite(t.left, t.frames, x)
                 outR = Self.hermite(t.right, t.frames, x)
+                if fadeLeft > 0 {
+                    let g = Float(fadeLeft) / Float(Self.fadeFrames)
+                    let xo = fadeFrom * t.sampleRate
+                    outL = outL * (1 - g) + Self.hermite(t.left, t.frames, xo) * g
+                    outR = outR * (1 - g) + Self.hermite(t.right, t.frames, xo) * g
+                }
+            }
+            if fadeLeft > 0 {
+                fadeFrom += r / sampleRate
+                fadeLeft -= 1
             }
             if filterOn {
                 func run(_ v0: Float, _ c1: inout Float, _ c2: inout Float) -> Float {
@@ -375,14 +421,17 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 left[i] = outL
                 right[i] = outR
             }
-            playhead += r / sampleRate
+            playhead += r / sampleRate + nudgeStep
+            trackOffset -= nudgeStep
             if looping {
                 // Wrap inside the loop; the record keeps its place, so the
                 // track's offset to it moves by one loop length.
                 if r > 0 && playhead >= loopEnd {
+                    startFade(from: playhead)
                     playhead -= loopLength
                     trackOffset += loopLength
                 } else if r < 0 && playhead < loopStart && playhead > loopStart - 0.25 {
+                    startFade(from: playhead)
                     playhead += loopLength
                     trackOffset -= loopLength
                 }
@@ -471,5 +520,39 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         let c2 = ym1 - 2.5 * y0 + 2 * y1 - 0.5 * y2
         let c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1)
         return ((c3 * f + c2) * f + c1) * f + y0
+    }
+
+    /// Self-test: plays a 440 Hz tone offline while "scrolling" 10 ms every
+    /// 4 buffers, once with jumps and once with nudges, and reports the
+    /// largest step between samples (a clean tone stays under ~0.03).
+    static func scrubTest() -> String {
+        let rate = 48000.0, frames = Int(rate * 10)
+        func run(nudge: Bool) -> Float {
+            let l = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            let r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            for i in 0..<frames { let v = Float(0.5 * sin(2 * .pi * 440 * Double(i) / rate)); l[i] = v; r[i] = v }
+            let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+            samples.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+            let deck = DeckEngine(definition: .traktorMK2, sampleRate: rate)
+            deck.internalMode = true
+            _ = deck.exchangeTrack(samples)
+            deck.jumpRequest = 1
+            deck.transportPlaying = true
+            let outL = UnsafeMutablePointer<Float>.allocate(capacity: 128), outR = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+            var last: Float = 0, worst: Float = 0
+            for b in 0..<600 {
+                if b > 40 && b % 4 == 0 {
+                    if nudge { deck.nudgeTotal += 0.01 } else { deck.jumpRequest = deck.telemetry.pointee.playhead + 0.01 }
+                }
+                deck.render(left: outL, right: outR, frames: 128, mix: false)
+                for i in 0..<128 {
+                    if b > 30 { worst = max(worst, abs(outL[i] - last)) }
+                    last = outL[i]
+                }
+            }
+            samples.pointee.free(); samples.deallocate(); outL.deallocate(); outR.deallocate()
+            return worst
+        }
+        return String(format: "Scrub test: largest sample step with jumps %.3f, with nudges %.3f (clean tone ≈ 0.029)", run(nudge: false), run(nudge: true))
     }
 }

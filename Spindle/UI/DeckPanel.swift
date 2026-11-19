@@ -87,7 +87,7 @@ struct DeckPanel: View {
                         WaveformInteraction(
                             onScroll: { points in
                                 guard let d = deck.track?.duration else { return }
-                                model.seek(deck: deck, by: Double(points) * d / Double(max(geo.size.width, 1)))
+                                model.scrub(deck: deck, by: Double(points) * d / Double(max(geo.size.width, 1)))
                             },
                             onClick: { fraction in
                                 guard let d = deck.track?.duration else { return }
@@ -104,7 +104,7 @@ struct DeckPanel: View {
                     .overlay {
                         WaveformInteraction(
                             onScroll: { points in
-                                model.seek(deck: deck, by: Double(points) * deck.laneWindow / Double(max(geo.size.width, 1)))
+                                model.scrub(deck: deck, by: Double(points) * deck.laneWindow / Double(max(geo.size.width, 1)))
                             },
                             onClick: { fraction in
                                 model.seek(deck: deck, by: (Double(fraction) - 0.5) * deck.laneWindow)
@@ -392,8 +392,8 @@ struct LaptopTransport: View {
                 .disabled(deck.track == nil || model.decks[1 - deck.id].track == nil)
                 .help("Match the other deck's tempo and line up the beats")
             Divider().frame(height: 18)
-            Button("‹") { model.seek(deck: deck, by: -0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge back 20 ms")
-            Button("›") { model.seek(deck: deck, by: 0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge forward 20 ms")
+            Button("‹") { model.scrub(deck: deck, by: -0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge back 20 ms")
+            Button("›") { model.scrub(deck: deck, by: 0.02) }.buttonStyle(FlatButtonStyle()).help("Nudge forward 20 ms")
             Divider().frame(height: 18)
             Text("TEMPO").font(Theme.label).foregroundStyle(Theme.inkMuted)
             Slider(value: Binding(get: { deck.tempo }, set: { model.setTempo($0, deck: deck) }),

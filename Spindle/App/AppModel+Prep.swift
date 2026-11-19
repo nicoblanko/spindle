@@ -13,7 +13,7 @@ extension AppModel {
     /// Where the Prep tools act: the live playhead while playing, else the cursor.
     var prepPosition: Double {
         if prepPage.playing, let e = engine?.preview {
-            let t = e.jumpRequest.isNaN ? e.telemetry.pointee.playhead : e.jumpRequest
+            let t = e.jumpRequest.isNaN ? e.telemetry.pointee.playhead + e.nudgePending : e.jumpRequest
             return max(0, t)
         }
         return prepPage.cursor
@@ -102,6 +102,16 @@ extension AppModel {
     }
 
     func prepSeek(by delta: Double) { prepSeek(to: prepPosition + delta) }
+
+    /// Scrolling or dragging the waveform: smooth while playing, a plain
+    /// move when stopped.
+    func prepScrub(by delta: Double) {
+        if prepPage.playing, let e = engine?.preview, e.jumpRequest.isNaN {
+            e.nudgeTotal += delta
+        } else {
+            prepSeek(by: delta)
+        }
+    }
 
     /// Moves by whole beats on the grid (or seconds when there's none).
     func prepStep(beats: Int) {

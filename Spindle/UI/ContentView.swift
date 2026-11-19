@@ -69,6 +69,10 @@ extension ContentView {
     /// PNG (with a track loaded and a simulated record playing), then puts
     /// the page back. Used to check layouts without clicking through.
     func snapshotIfRequested() async {
+        if ProcessInfo.processInfo.environment["SPINDLE_SCRUBTEST"] != nil {
+            spindleLog.notice("\(DeckEngine.scrubTest())")
+            return
+        }
         if ProcessInfo.processInfo.environment["SPINDLE_PREPLAG"] != nil {
             // Lag check: step through Prep's list like holding the down arrow.
             try? await Task.sleep(for: .seconds(4))

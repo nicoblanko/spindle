@@ -417,6 +417,18 @@ extension AppModel {
         seek(deck: deck, to: base + delta)
     }
 
+    /// Scrolling or dragging the waveform: while the deck plays, the track
+    /// is pushed along smoothly (no audible jumps); when it's stopped, it
+    /// simply moves.
+    func scrub(deck: DeckModel, by delta: Double) {
+        guard let e = engine?.decks[deck.id] else { return }
+        if abs(e.telemetry.pointee.pitch) > 0.05 && e.jumpRequest.isNaN {
+            e.nudgeTotal += delta
+        } else {
+            seek(deck: deck, by: delta)
+        }
+    }
+
     func setLaneWindow(_ seconds: Double, deck: DeckModel) {
         deck.laneWindow = min(max(seconds, 1.5), 48)
     }

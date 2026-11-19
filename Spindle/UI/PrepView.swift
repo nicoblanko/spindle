@@ -543,7 +543,7 @@ private struct PrepOverview: View {
                     context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(Theme.accent))
                 }
             }
-            WaveformInteraction(onScroll: { model.prepSeek(by: Double($0) * duration / 1000) },
+            WaveformInteraction(onScroll: { model.prepScrub(by: Double($0) * duration / 1000) },
                                 onClick: { model.prepSeek(to: Double($0) * duration) },
                                 dragsAbsolutely: true)
         }
@@ -568,7 +568,7 @@ private struct PrepLane: View {
                     Canvas { context, size in draw(context, size, playhead: t) }
                 }
                 WaveformInteraction(
-                    onScroll: { model.prepSeek(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
+                    onScroll: { model.prepScrub(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
                     onClick: { f in model.prepSeek(to: model.prepPosition + (Double(f) - 0.5) * page.zoom) },
                     onZoom: { f in page.zoom = min(max(page.zoom / Double(f), 2), 120) })
                 zoomButtons
