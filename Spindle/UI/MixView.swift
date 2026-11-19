@@ -79,6 +79,17 @@ private struct ClipGrid: View {
     @State private var onlyMatches = false
     @State private var onlyReady = false
     @AppStorage("mix.columns") private var columnSource = "playlists"
+    @AppStorage("mix.groupField") private var groupFieldData = ""
+
+    /// The field the columns are grouped by when Columns is "Field".
+    private var groupField: FieldRef {
+        get {
+            (try? JSONDecoder().decode(FieldRef.self, from: Data(groupFieldData.utf8))) ?? .tempoGroup
+        }
+        nonmutating set {
+            groupFieldData = (try? JSONEncoder().encode(newValue)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
+    }
 
     private struct Column: Identifiable {
         let id: String
@@ -91,9 +102,14 @@ private struct ClipGrid: View {
     private var usePlaylists: Bool { columnSource == "playlists" && !library.playlists.playlists.isEmpty }
 
     private var columns: [Column] {
-        if columnSource == "tags" && !library.tags.tags.isEmpty {
-            return library.tags.sorted.map { tag in
-                Column(id: tag.id.uuidString, title: tag.name, tracks: library.tracks(withTag: tag.id), ordered: false)
+        if columnSource == "field" {
+            let ctx = model.records
+            let records = library.allTracks.enumerated().map {
+                Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1)
+            }
+            return ctx.group(records, by: groupField).map { g in
+                let title = g.options.isEmpty ? g.title : g.options.map(\.name).joined(separator: " + ")
+                return Column(id: g.id, title: title, tracks: g.records.map(\.track), ordered: false)
             }
         }
         if usePlaylists {
@@ -145,12 +161,22 @@ private struct ClipGrid: View {
             Spacer()
             Picker("Columns", selection: $columnSource) {
                 Text("Playlists").tag("playlists")
-                Text("Tags").tag("tags")
                 Text("Music folders").tag("folders")
+                Text("Field").tag("field")
             }
             .pickerStyle(.segmented)
             .frame(width: 280)
-            .help(library.playlists.playlists.isEmpty ? "Make playlists on the Organize page to use them as columns" : "What the columns show")
+            .help("What the columns show: your playlists, your music folders, or one column per value of a field")
+            if columnSource == "field" {
+                Picker("", selection: Binding(get: { groupField }, set: { groupField = $0 })) {
+                    ForEach(model.records.allFields.filter { $0 != .name && $0 != .length }, id: \.self) {
+                        Text(model.records.name($0)).tag($0)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 140)
+                .help("One column per value of this field")
+            }
             Toggle("Matches only", isOn: $onlyMatches).toggleStyle(.checkbox)
             Toggle("Mix-ready only", isOn: $onlyReady).toggleStyle(.checkbox)
             TextField("Search", text: $library.search)

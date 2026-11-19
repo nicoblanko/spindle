@@ -48,8 +48,12 @@ nonisolated struct TagDef: Codable, Sendable, Identifiable, Equatable {
     var rule: TagRule?
     /// Made by "Make tempo groups" (replaced when that runs again).
     var automatic = false
+    /// Position in the option list (Airtable-style: you set the order).
+    var order: Int?
 
     var color: Color { TagStore.palette[colorIndex % TagStore.palette.count] }
+    /// Dark text on the pastel pill, as in Airtable.
+    static let textColor = Color(hex: 0x1d1f25)
 }
 
 @Observable
@@ -58,10 +62,14 @@ final class TagStore {
     /// Hand-placed tags per file path.
     private(set) var assigned: [String: Set<UUID>] = [:]
 
+    /// Airtable's light option colours: blue, cyan, teal, green, yellow,
+    /// orange, red, pink, purple, grey.
     static let palette: [Color] = [
-        Color(hex: 0x6fa8dc), Color(hex: 0x93c47d), Color(hex: 0xe6b450), Color(hex: 0xc27ba0),
-        Color(hex: 0x76a5af), Color(hex: 0xe06666), Color(hex: 0x8e7cc3), Color(hex: 0xb4a7d6),
+        Color(hex: 0xcfdfff), Color(hex: 0xd0f0fd), Color(hex: 0xc2f5e9), Color(hex: 0xd1f7c4),
+        Color(hex: 0xffeab6), Color(hex: 0xfee2d5), Color(hex: 0xffdce5), Color(hex: 0xffdaf6),
+        Color(hex: 0xede2fe), Color(hex: 0xe5e9f0),
     ]
+    static let paletteNames = ["Blue", "Cyan", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Grey"]
 
     private struct Saved: Codable { var tags: [TagDef]; var assigned: [String: Set<UUID>] }
 
@@ -94,7 +102,38 @@ final class TagStore {
         }
     }
 
-    var manualTags: [TagDef] { sorted.filter { $0.rule == nil } }
+    /// Your tags, in the order you arranged them.
+    var manualTags: [TagDef] {
+        tags.enumerated().filter { $0.element.rule == nil }
+            .sorted { ($0.element.order ?? $0.offset) < ($1.element.order ?? $1.offset) }
+            .map(\.element)
+    }
+
+    var tempoGroups: [TagDef] {
+        tags.filter { $0.rule != nil }.sorted { ($0.rule!.minBPM, $0.name) < ($1.rule!.minBPM, $1.name) }
+    }
+
+    /// Your tags on a track, in option order.
+    func manualTags(for path: String) -> [TagDef] {
+        guard let ids = assigned[path], !ids.isEmpty else { return [] }
+        return manualTags.filter { ids.contains($0.id) }
+    }
+
+    func ids(for path: String) -> Set<UUID> { assigned[path] ?? [] }
+
+    func tag(named name: String) -> TagDef? {
+        manualTags.first { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+    }
+
+    /// Drag-to-reorder in Manage tags.
+    func moveOptions(from offsets: IndexSet, to destination: Int) {
+        var list = manualTags
+        list.move(fromOffsets: offsets, toOffset: destination)
+        for (i, t) in list.enumerated() {
+            if let k = tags.firstIndex(where: { $0.id == t.id }) { tags[k].order = i }
+        }
+        save()
+    }
 
     /// Whether a track has a tag (by hand, or by matching its rule).
     func has(_ tag: TagDef, path: String, analysis: TrackAnalysis?) -> Bool {
@@ -110,7 +149,10 @@ final class TagStore {
 
     @discardableResult
     func create(name: String, rule: TagRule? = nil) -> UUID {
-        let tag = TagDef(name: name, colorIndex: tags.count, rule: rule)
+        // New options take the next colour and go to the end, as in Airtable.
+        let mine = tags.filter { ($0.rule == nil) == (rule == nil) }.count
+        var tag = TagDef(name: name, colorIndex: mine % Self.palette.count, rule: rule)
+        if rule == nil { tag.order = (manualTags.compactMap(\.order).max() ?? manualTags.count - 1) + 1 }
         tags.append(tag)
         save()
         return tag.id

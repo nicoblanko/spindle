@@ -53,15 +53,28 @@ struct OrganizeView: View {
     private var selectionBinding: Binding<Set<URL>> {
         Binding(get: { model.organizeSelection }, set: { model.organizeSelection = $0 })
     }
-    @State private var sortOrder = [KeyPathComparator(\OrganizeRow.index)]
     @State private var dropTargeted = false
     @State private var keyFilter: KeySlot?
+    @State private var showFilter = false
+    @State private var showGroup = false
+    @State private var showHide = false
+
+    private var viewBinding: Binding<ViewSettings> {
+        Binding(get: { model.organizeView }, set: { model.organizeView = $0 })
+    }
+
+    /// The list shown (folder, playlist or tag), narrowed by the key wheel.
+    private var baseRecords: [Record] {
+        library.visibleTracks.enumerated()
+            .map { Record(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
+            .filter { r in keyFilter.map { f in r.analysis.map(KeySlot.init) == f } ?? true }
+    }
+
+    /// After the view's filter and sort.
+    private var records: [Record] { model.records.apply(model.organizeView, to: baseRecords) }
 
     private var rows: [OrganizeRow] {
-        library.visibleTracks.enumerated()
-            .map { OrganizeRow(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
-            .filter { row in keyFilter.map { f in row.analysis.map(KeySlot.init) == f } ?? true }
-            .sorted(using: sortOrder)
+        records.map { OrganizeRow(track: $0.track, analysis: $0.analysis, index: $0.index) }
     }
 
     /// The wheel counts everything in the list, not only the filtered key.
@@ -81,7 +94,7 @@ struct OrganizeView: View {
                 .frame(width: 210)
             VStack(spacing: 1) {
                 toolbar
-                table
+                grid
                     .frame(minHeight: 200)
             }
             VStack(spacing: 1) {
@@ -90,15 +103,15 @@ struct OrganizeView: View {
                 NextTracksPanel(focused: focused, rows: wheelRows, model: model, select: { selection = [$0] })
                     .frame(height: 300)
             }
-            .frame(width: 400)
+            .frame(width: 380)
         }
         .background(Theme.line)
-        .onChange(of: library.playlist) { sortOrder = [KeyPathComparator(\OrganizeRow.index)] }
         .onChange(of: library.crate) { keyFilter = nil }
     }
 
     private var toolbar: some View {
-        HStack(spacing: Theme.space3) {
+        let view = model.organizeView
+        return HStack(spacing: Theme.space2) {
             LabelText(library.selectionName)
             if analysis.pending > 0 {
                 Text("Analysing… \(analysis.pending) left")
@@ -106,13 +119,28 @@ struct OrganizeView: View {
                     .foregroundStyle(Theme.inkMuted)
             }
             Spacer()
+            toolbarButton(view.hidden.isEmpty ? "Hide fields" : "\(view.hidden.count) hidden fields",
+                          icon: "eye.slash", active: !view.hidden.isEmpty) { showHide = true }
+                .popover(isPresented: $showHide) { HideFieldsView(view: viewBinding, context: model.records) }
+            toolbarButton(view.conditions.isEmpty ? "Filter" : "Filtered by \(Set(view.conditions.map(\.field)).map(model.records.name).sorted().joined(separator: ", "))",
+                          icon: "line.3.horizontal.decrease", active: !view.conditions.isEmpty) { showFilter = true }
+                .popover(isPresented: $showFilter) { FilterView(view: viewBinding, context: model.records) }
+            toolbarButton(view.groupBy.map { "Grouped by \(model.records.name($0))" } ?? "Group",
+                          icon: "rectangle.grid.1x2", active: view.groupBy != nil) { showGroup = true }
+                .popover(isPresented: $showGroup) { GroupView(view: viewBinding, context: model.records) }
+            if let sort = view.sortField {
+                toolbarButton("Sorted by \(model.records.name(sort))", icon: "arrow.up.arrow.down", active: true) {
+                    model.organizeView.sortField = nil
+                }
+                .help("Click to stop sorting (or click a column header)")
+            }
             if let playlist = library.selectedPlaylist {
                 Button("Add files…") { model.chooseFilesForPlaylist(playlist.id) }
                     .buttonStyle(FlatButtonStyle())
                     .help("Add audio files or folders from anywhere on your Mac")
             }
             if selection.count > 1 {
-                Button("New playlist from \(selection.count) tracks") {
+                Button("New playlist from \(selection.count)") {
                     let id = library.playlists.create(name: "New playlist", folder: false, in: nil)
                     model.addToPlaylist(rows.filter { selection.contains($0.id) }.map(\.id), playlist: id)
                     library.playlist = id
@@ -121,62 +149,42 @@ struct OrganizeView: View {
             }
             TextField("Search", text: $library.search)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 180)
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, Theme.space2)
         .background(Theme.panelRaised)
     }
 
-    private var table: some View {
+    private func toolbarButton(_ title: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(title).lineLimit(1)
+            }
+            .font(Theme.caption)
+            .foregroundStyle(active ? TagDef.textColor : Theme.inkMuted)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(active ? TagStore.palette[3] : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var grid: some View {
         let focusedAnalysis = focused.flatMap { analysis.analysis(for: $0) }
-        return Table(of: OrganizeRow.self, selection: selectionBinding, sortOrder: $sortOrder) {
-            TableColumn("#", value: \.index) { Text("\($0.index)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint) }
-                .width(30)
-            TableColumn("Track", value: \.name) { row in
-                HStack(spacing: Theme.space1) {
-                    if let a = focusedAnalysis, let b = row.analysis, row.id != focused, Compatibility.mixes(a, b) {
-                        Circle().fill(Theme.match).frame(width: 6, height: 6)
-                    }
-                    Text(row.name).lineLimit(1)
-                }
-            }
-            .width(min: 180, ideal: 300)
-            TableColumn("Folder", value: \.crate) { Text($0.crate).foregroundStyle(Theme.inkMuted) }
-                .width(min: 60, ideal: 90)
-            TableColumn("BPM", value: \.bpm) { row in
-                Text(row.analysis == nil ? "—" : String(format: "%.1f", row.bpm)).font(Theme.readoutSm)
-            }
-            .width(52)
-            TableColumn("Key", value: \.keySort) { KeyChip(analysis: $0.analysis) }
-                .width(80)
-            TableColumn("Energy", value: \.energy) { EnergyBar(energy: $0.energy) }
-                .width(64)
-            TableColumn("Tags") { row in TagChips(tags: library.tags.tags(for: row.id.path, analysis: row.analysis)) }
-                .width(min: 60, ideal: 120)
-            TableColumn("Intro", value: \.intro) { Text($0.intro).foregroundStyle(Theme.inkMuted) }
-                .width(64)
-            TableColumn("Outro", value: \.outro) { Text($0.outro).foregroundStyle(Theme.inkMuted) }
-                .width(64)
-            TableColumn("Length", value: \.duration) { row in
-                Text(row.analysis == nil ? "—" : Self.length(row.duration)).font(Theme.readoutSm)
-            }
-            .width(48)
-        } rows: {
-            ForEach(rows) { row in
-                TableRow(row).draggable(row.track.url)
-            }
-        }
-        .font(Theme.body)
-        .contextMenu(forSelectionType: URL.self) { urls in
-            contextMenu(urls)
-        } primaryAction: { urls in
-            if let url = urls.first { Task { await model.load(url: url, into: model.freeDeck) } }
-        }
+        return RecordGrid(
+            model: model,
+            records: records,
+            view: viewBinding,
+            mixes: { r in
+                guard let a = focusedAnalysis, let b = r.analysis, r.id != focused else { return false }
+                return Compatibility.mixes(a, b)
+            },
+            menu: { AnyView(contextMenu($0)) })
         .overlay {
-            if dropTargeted {
-                Rectangle().strokeBorder(Theme.accent, lineWidth: 2)
-            }
+            if dropTargeted { Rectangle().strokeBorder(Theme.accent, lineWidth: 2) }
         }
         .dropDestination(for: URL.self) { urls, _ in
             guard let playlist = library.selectedPlaylist else { return false }
@@ -189,6 +197,11 @@ struct OrganizeView: View {
                     Text("This playlist is empty").font(Theme.body).foregroundStyle(Theme.inkMuted)
                     Text("Drag tracks here from All tracks, or files and folders from Finder, or use Add files….")
                         .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                }
+            } else if records.isEmpty && !model.organizeView.conditions.isEmpty {
+                VStack(spacing: Theme.space2) {
+                    Text("No tracks match the filter").font(Theme.body).foregroundStyle(Theme.inkMuted)
+                    Button("Clear filter") { model.organizeView.conditions = [] }.buttonStyle(FlatButtonStyle())
                 }
             }
         }
@@ -215,7 +228,7 @@ struct OrganizeView: View {
         Menu("Tags") {
             let paths = ordered.map(\.path)
             ForEach(library.tags.manualTags) { tag in
-                let all = paths.allSatisfy { library.tags.assigned[$0]?.contains(tag.id) == true }
+                let all = paths.allSatisfy { library.tags.ids(for: $0).contains(tag.id) }
                 Button {
                     library.tags.set(tag.id, on: paths, !all)
                 } label: {
@@ -247,7 +260,7 @@ struct OrganizeView: View {
         let paths = Set(urls.map(\.path))
         let offsets = IndexSet(playlist.tracks.indices.filter { paths.contains(playlist.tracks[$0]) })
         library.playlists.reorder(playlist.id, from: offsets, to: destination)
-        sortOrder = [KeyPathComparator(\OrganizeRow.index)]
+        model.organizeView.sortField = nil
     }
 
     static func length(_ seconds: Double) -> String {
@@ -655,6 +668,7 @@ struct CrateList: View {
     @State private var pendingDelete: PlaylistNode?
     /// Tempo group being edited (or a new one).
     @State private var editingGroup: TagDef?
+    @State private var editingTags = false
 
     private var store: PlaylistStore { library.playlists }
 
@@ -734,35 +748,29 @@ struct CrateList: View {
 
     @ViewBuilder
     private var tagSection: some View {
-        HStack {
-            LabelText("Tags")
-            Spacer()
-            Menu {
-                Button("New tag") {
-                    let id = tagStore.create(name: "New tag")
-                    library.tag = id
-                    draft = "New tag"
-                    renaming = id
-                }
-                Button("New tempo group…") {
-                    editingGroup = TagDef(name: "", colorIndex: tagStore.tags.count, rule: TagRule())
-                }
-                Divider()
-                Button("Make tempo groups") { makeTempoGroups() }
-            } label: {
-                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+        sectionHeader("Tags") {
+            Button("New tag") {
+                let id = tagStore.create(name: "New tag")
+                draft = "New tag"
+                renaming = id
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("New tag or tempo group")
+            Button("Edit tags…") { editingTags = true }
         }
-        .padding(.horizontal, Theme.space3)
-        .padding(.top, Theme.space4)
-        .padding(.bottom, Theme.space2)
-        ForEach(tagStore.sorted) { tag in tagRow(tag) }
-        if tagStore.tags.isEmpty {
-            Text("Tags group tracks across folders. Tempo groups collect tracks in a BPM range that mix with each other.")
+        ForEach(tagStore.manualTags) { tag in tagRow(tag) }
+        if tagStore.manualTags.isEmpty {
+            Text("Add tags in the Tags column: click a cell, type a name, press Enter.")
+                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                .padding(.horizontal, Theme.space3)
+        }
+        sectionHeader("Tempo groups") {
+            Button("Make tempo groups") { makeTempoGroups() }
+            Button("New tempo group…") {
+                editingGroup = TagDef(name: "", colorIndex: tagStore.tempoGroups.count, rule: TagRule())
+            }
+        }
+        ForEach(tagStore.tempoGroups) { tag in groupRow(tag) }
+        if tagStore.tempoGroups.isEmpty {
+            Text("Tempo groups collect tracks in a BPM range that mix with each other.")
                 .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                 .padding(.horizontal, Theme.space3)
             Button("Make tempo groups") { makeTempoGroups() }
@@ -780,6 +788,44 @@ struct CrateList: View {
                     }
                 }
             }
+            .sheet(isPresented: $editingTags) {
+                ManageOptionsView(
+                    title: "Tags",
+                    items: tagStore.manualTags.map { .init(id: $0.id.uuidString, name: $0.name, colorIndex: $0.colorIndex) },
+                    onRename: { id, name in if var t = tagStore.tag(UUID(uuidString: id)), !name.isEmpty { t.name = name; tagStore.update(t) } },
+                    onRecolor: { id, c in if var t = tagStore.tag(UUID(uuidString: id)) { t.colorIndex = c; tagStore.update(t) } },
+                    onDelete: { id in if let u = UUID(uuidString: id) { tagStore.delete(u) } },
+                    onMove: { tagStore.moveOptions(from: $0, to: $1) },
+                    onAdd: { _ = tagStore.create(name: $0) })
+            }
+    }
+
+    private func sectionHeader<M: View>(_ title: String, @ViewBuilder menu: () -> M) -> some View {
+        HStack {
+            LabelText(title)
+            Spacer()
+            Menu { menu() } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(.horizontal, Theme.space3)
+        .padding(.top, Theme.space4)
+        .padding(.bottom, Theme.space2)
+    }
+
+    /// Clicking a tag filters the grid to tracks that have it (Airtable's
+    /// "Tags has any of …"), over all tracks.
+    private func showTag(_ tag: TagDef) {
+        library.selectAll()
+        model.organizeView.conditions = [FilterCondition(field: .tags, op: .hasAny, options: [tag.id.uuidString])]
+    }
+
+    private func isShowing(_ tag: TagDef) -> Bool {
+        let c = model.organizeView.conditions
+        return c.count == 1 && c[0].field == .tags && c[0].op == .hasAny && c[0].options == [tag.id.uuidString]
     }
 
     private func makeTempoGroups() {
@@ -788,11 +834,10 @@ struct CrateList: View {
     }
 
     private func tagRow(_ tag: TagDef) -> some View {
-        let selected = library.tag == tag.id
-        let count = library.tracks(withTag: tag.id).count
+        let selected = isShowing(tag)
+        let count = tagStore.assigned.values.filter { $0.contains(tag.id) }.count
         return HStack(spacing: Theme.space1) {
             Spacer().frame(width: 10)
-            Circle().fill(tag.color).frame(width: 8, height: 8).frame(width: 14)
             if renaming == tag.id {
                 TextField("Name", text: $draft)
                     .textFieldStyle(.plain)
@@ -805,10 +850,47 @@ struct CrateList: View {
                     }
                     .onExitCommand { renaming = nil }
             } else {
-                Text(tag.name).font(Theme.body).lineLimit(1)
-                if let rule = tag.rule, rule.minEnergy > 1 || rule.maxEnergy < 10 || rule.minor != nil {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)
-                }
+                Pill(name: tag.name, color: tag.color)
+            }
+            Spacer()
+            Text("\(count)").font(Theme.readoutSm)
+        }
+        .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
+        .padding(.leading, Theme.space2)
+        .padding(.trailing, Theme.space3)
+        .padding(.vertical, 4)
+        .background(selected ? Theme.accentSoft : (dropTarget == tag.id ? Theme.panelRaised : Color.clear))
+        .overlay { if dropTarget == tag.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) } }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { draft = tag.name; renaming = tag.id }
+        .onTapGesture { if selected { model.organizeView.conditions = [] } else { showTag(tag) } }
+        .help("Show tracks with this tag. Drag tracks here to tag them.")
+        .dropDestination(for: URL.self) { urls, _ in
+            tagStore.set(tag.id, on: PlaylistStore.audioFiles(in: urls).map(\.path), true)
+            return true
+        } isTargeted: { inside in
+            if inside { dropTarget = tag.id } else if dropTarget == tag.id { dropTarget = nil }
+        }
+        .contextMenu {
+            Button("Rename") { draft = tag.name; renaming = tag.id }
+            Button("Edit tags…") { editingTags = true }
+            Divider()
+            Button("Delete tag", role: .destructive) {
+                if isShowing(tag) { model.organizeView.conditions = [] }
+                tagStore.delete(tag.id)
+            }
+        }
+    }
+
+    private func groupRow(_ tag: TagDef) -> some View {
+        let selected = library.tag == tag.id
+        let count = library.tracks(withTag: tag.id).count
+        return HStack(spacing: Theme.space1) {
+            Spacer().frame(width: 10)
+            Image(systemName: "metronome").font(.system(size: 10)).frame(width: 14)
+            Text(tag.name).font(Theme.body).lineLimit(1)
+            if let rule = tag.rule, rule.minEnergy > 1 || rule.maxEnergy < 10 || rule.minor != nil {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)
             }
             Spacer()
             Text("\(count)").font(Theme.readoutSm)
@@ -817,36 +899,15 @@ struct CrateList: View {
         .padding(.leading, Theme.space2)
         .padding(.trailing, Theme.space3)
         .padding(.vertical, 5)
-        .background(selected ? Theme.accentSoft : (dropTarget == tag.id ? Theme.panelRaised : Color.clear))
-        .overlay { if dropTarget == tag.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) } }
+        .background(selected ? Theme.accentSoft : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if tag.rule == nil { draft = tag.name; renaming = tag.id } else { editingGroup = tag }
-        }
+        .onTapGesture(count: 2) { editingGroup = tag }
         .onTapGesture { library.tag = tag.id }
-        .help(tag.rule.map { "Tempo group: \($0.summary). Tracks join by themselves." } ?? "Your tag. Drag tracks here or right-click tracks › Tags.")
-        .dropDestination(for: URL.self) { urls, _ in
-            guard tag.rule == nil else { return false }
-            tagStore.set(tag.id, on: PlaylistStore.audioFiles(in: urls).map(\.path), true)
-            return true
-        } isTargeted: { inside in
-            if inside && tag.rule == nil { dropTarget = tag.id } else if dropTarget == tag.id { dropTarget = nil }
-        }
+        .help(tag.rule.map { "Tempo group: \($0.summary). Tracks join by themselves." } ?? "")
         .contextMenu {
-            if tag.rule == nil {
-                Button("Rename") { draft = tag.name; renaming = tag.id }
-            } else {
-                Button("Edit range…") { editingGroup = tag }
-            }
-            Menu("Colour") {
-                ForEach(0..<TagStore.palette.count, id: \.self) { i in
-                    Button { var t = tag; t.colorIndex = i; tagStore.update(t) } label: {
-                        Label("Colour \(i + 1)", systemImage: tag.colorIndex % TagStore.palette.count == i ? "checkmark.circle.fill" : "circle.fill")
-                    }
-                }
-            }
+            Button("Edit range…") { editingGroup = tag }
             Divider()
-            Button("Delete tag", role: .destructive) {
+            Button("Delete group", role: .destructive) {
                 if library.tag == tag.id { library.selectAll() }
                 tagStore.delete(tag.id)
             }

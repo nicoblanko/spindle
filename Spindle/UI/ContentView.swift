@@ -113,20 +113,41 @@ extension ContentView {
             testFolder = folder
             try? await Task.sleep(for: .seconds(8))      // let the outside file be analysed
         }
-        // Tag test: tempo groups plus one hand-made tag; removed at the end.
+        // Field test: tags, a single-select and a rating field, grouped and
+        // filtered like Airtable; everything is removed again at the end.
         var testTags: [UUID] = []
+        var testFields: [UUID] = []
         let savedColumns = UserDefaults.standard.string(forKey: "mix.columns")
-        if ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_TAGS"] != nil {
+        let savedGroupField = UserDefaults.standard.string(forKey: "mix.groupField")
+        let savedView = model.organizeView
+        if ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_TAGS"] != nil, tracks.count > 8 {
             let store = model.library.tags
             let before = Set(store.tags.map(\.id))
             store.makeTempoGroups(bpms: model.library.allTracks.compactMap { model.analysis.analysis(for: $0.url)?.bpm })
             let vocal = store.create(name: "vocal")
-            store.set(vocal, on: tracks.prefix(3).map(\.url.path), true)
+            let warm = store.create(name: "warm-up")
+            store.set(vocal, on: tracks.prefix(4).map(\.url.path), true)
+            store.set(warm, on: tracks[2..<7].map(\.url.path), true)
             testTags = store.tags.map(\.id).filter { !before.contains($0) }
-            let groups = store.tags.filter { $0.rule != nil }
-            spindleLog.notice("Tag test: \(groups.count) tempo groups: " + groups.map { "\($0.name) (\(model.library.tracks(withTag: $0.id).count))" }.joined(separator: ", "))
-            model.library.tag = groups.max { model.library.tracks(withTag: $0.id).count < model.library.tracks(withTag: $1.id).count }?.id
-            UserDefaults.standard.set("tags", forKey: "mix.columns")
+            let set = model.fields.addField(name: "Set", type: .singleSelect)
+            let club = model.fields.addOption(set, name: "Club")!
+            let radio = model.fields.addOption(set, name: "Radio")!
+            let rating = model.fields.addField(name: "Rating", type: .rating)
+            for (i, t) in tracks.prefix(8).enumerated() {
+                model.fields.set(t.url.path, set, .options([i % 2 == 0 ? club : radio]))
+                model.fields.set(t.url.path, rating, .rating(i % 5 + 1))
+            }
+            testFields = [set, rating]
+            model.library.selectAll()
+            model.organizeView = ViewSettings(conditions: [FilterCondition(field: .energy, op: .gte, number: 5)],
+                                              groupBy: .tags, hidden: [.intro, .outro, .folder, .length, .tempoGroup])
+            UserDefaults.standard.set("field", forKey: "mix.columns")
+            UserDefaults.standard.set(String(data: try! JSONEncoder().encode(FieldRef.tags), encoding: .utf8), forKey: "mix.groupField")
+            let shown = model.records.apply(model.organizeView, to: model.library.visibleTracks.enumerated().map {
+                Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1) })
+            let groups = model.records.group(shown, by: .tags)
+            spindleLog.notice("Field test: \(shown.count) tracks with energy ≥ 5; groups by Tags: " + groups.map { g in
+                "\(g.options.map(\.name).joined(separator: "+").isEmpty ? g.title : g.options.map(\.name).joined(separator: "+")) (\(g.records.count))" }.joined(separator: ", "))
         }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
@@ -150,10 +171,13 @@ extension ContentView {
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
-        if !testTags.isEmpty {
+        if !testTags.isEmpty || !testFields.isEmpty {
             model.library.selectAll()
             for id in testTags { model.library.tags.delete(id) }
+            for id in testFields { model.fields.deleteField(id) }
+            model.organizeView = savedView
             UserDefaults.standard.set(savedColumns, forKey: "mix.columns")
+            UserDefaults.standard.set(savedGroupField, forKey: "mix.groupField")
         }
         if let testFolder {
             model.library.selectAll()

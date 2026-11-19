@@ -13,12 +13,16 @@ All four pages work:
   12-colour wheel plus a mood (Dark = minor, Bright = major): neighbouring
   colours mix well. For a selected track, "Good next tracks" lists what
   mixes after it (same key, lift, drop, mood change). Playlists and
-  folders for sets, holding tracks from anywhere on disk. Tags: your own
-  (put on by hand) and tempo groups (a BPM range, optionally energy and
-  mood, that tracks join by themselves); "Make tempo groups" splits the
+  folders for sets, holding tracks from anywhere on disk. The track list
+  is an Airtable-style grid: add your own fields (multiple select, single
+  select, text, number, checkbox, rating), edit cells in place, and
+  Filter (and/or conditions on any field), Group (collapsible sections)
+  and Sort. Tags is a built-in multiple-select field with Airtable's
+  option picker and colours. Tempo groups (a BPM range, optionally energy and
+  mood, that tracks join by themselves): "Make tempo groups" splits the
   library into ranges no wider than 6% so every track in a group mixes
-  with the others. Playlists, tags or folders can be the Mix page's
-  columns.
+  with the others. The Mix page's columns can be playlists, folders, or
+  one column per value of any field.
 - **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.

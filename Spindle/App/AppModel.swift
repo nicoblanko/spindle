@@ -126,6 +126,13 @@ final class AppModel {
     let library = LibraryModel()
     let analysis = AnalysisStore()
     let prep = PrepStore()
+    /// Your own fields on the Organize grid.
+    let fields = FieldStore()
+    /// The Organize grid's filter, grouping, sort and hidden fields.
+    var organizeView = ViewSettings.load() {
+        didSet { organizeView.save() }
+    }
+    var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep) }
     let prepPage = PrepPageModel()
     let sessions = SessionStore()
     let midi = MIDIController()
