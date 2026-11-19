@@ -22,6 +22,15 @@ Open `Spindle.xcodeproj` in Xcode 26 or later and run the Spindle scheme
 
 ## Licence
 
-GPL-3.0-or-later; see [LICENSE](LICENSE). Being GPL, Spindle can reuse code
-from other GPL projects such as Mixxx (GPL-2.0-or-later), xwax and
-libKeyFinder, with their copyright notices kept.
+Copyright (C) 2026 Rein Blank
+
+Spindle is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (SPDX: GPL-3.0-or-later). It is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The full licence text is
+in [LICENSE](LICENSE).
+
+Being GPL, Spindle can reuse code from other GPL projects such as Mixxx
+(GPL-2.0-or-later), xwax and libKeyFinder, with their copyright notices kept.
