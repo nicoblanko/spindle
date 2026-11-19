@@ -54,7 +54,13 @@ struct RecordGrid: View {
         nonmutating set { if let selection { selection.wrappedValue = newValue } else { model.organizeSelection = newValue } }
     }
 
-    private var columns: [FieldRef] { context.orderedFields(view).filter { !view.hidden.contains($0) } }
+    /// Visible columns, worked out once per redraw (rows used to recompute them).
+    @State private var columnCache = ColumnCache()
+    final class ColumnCache {
+        var columns: [FieldRef] = []
+        func refresh(_ c: [FieldRef]) { columns = c }
+    }
+    private var columns: [FieldRef] { columnCache.columns }
 
     private func width(_ f: FieldRef) -> CGFloat {
         switch f {
@@ -95,6 +101,7 @@ struct RecordGrid: View {
 
     var body: some View {
         let _ = optionCache.map.removeAll(keepingCapacity: true)
+        let _ = columnCache.refresh(context.orderedFields(view).filter { !view.hidden.contains($0) })
         GeometryReader { geo in
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
@@ -276,10 +283,12 @@ struct RecordGrid: View {
         .background(isSelected ? Theme.accentSoft : Theme.panel)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.5)).frame(height: 1) }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if let onOpen { onOpen(r) } else { Task { await model.load(url: r.id, into: model.freeDeck) } }
-        }
+        // Select on the first click straight away; a second click opens.
+        // (onTapGesture(count: 2) made every single click wait ~0.3 s.)
         .onTapGesture { click(r) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            if let onOpen { onOpen(r) } else { Task { await model.load(url: r.id, into: model.freeDeck) } }
+        })
         .draggable(r.track.url)
         .contextMenu { menu(selected.contains(r.id) ? selected : [r.id]) }
     }
@@ -461,19 +470,14 @@ private struct SelectCell: View {
     let onCreate: (String) -> String?
     let onManage: () -> Void
     @State private var open = false
-    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 3) {
             ForEach(options.filter { selected.contains($0.id) }) { Pill(name: $0.name, color: $0.color) }
             Spacer(minLength: 0)
-            if hovering && selected.isEmpty {
-                Image(systemName: "plus").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
         .onTapGesture { open = true }
         .popover(isPresented: $open, arrowEdge: .bottom) {
             OptionPicker(options: options, selected: selected, multi: multi,

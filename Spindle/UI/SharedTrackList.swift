@@ -50,10 +50,11 @@ struct SharedTrackList: View {
     }
 
     var body: some View {
+        let recs = records
         VStack(spacing: 0) {
-            toolbar
+            toolbar(count: recs.count)
             Rectangle().fill(Theme.line).frame(height: 1)
-            RecordGrid(model: model, records: records, view: view,
+            RecordGrid(model: model, records: recs, view: view,
                        mixes: { _ in false },
                        menu: { AnyView(menu($0)) },
                        selection: selection,
@@ -64,11 +65,11 @@ struct SharedTrackList: View {
         .background(Theme.panel)
     }
 
-    private var toolbar: some View {
+    private func toolbar(count: Int) -> some View {
         let v = view.wrappedValue
         return HStack(spacing: Theme.space2) {
             Text(library.selectionName).font(Theme.label).foregroundStyle(Theme.ink).lineLimit(1)
-            Text("\(records.count)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
+            Text("\(count)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
             Spacer(minLength: Theme.space2)
             Menu {
                 ForEach(model.savedViews) { saved in
