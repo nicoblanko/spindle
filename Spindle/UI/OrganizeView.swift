@@ -4,7 +4,7 @@
 //
 //  Page 1, Organize: find tracks that work together and build playlists
 //  for sets. Library and playlists on the left, the track table in the
-//  middle, and on the right a key map plus, for the selected track, the
+//  middle, and on the right a key wheel plus, for the selected track, the
 //  tracks that would mix well after it, explained in plain words.
 //
 
@@ -55,11 +55,19 @@ struct OrganizeView: View {
     }
     @State private var sortOrder = [KeyPathComparator(\OrganizeRow.index)]
     @State private var dropTargeted = false
+    @State private var keyFilter: KeySlot?
 
     private var rows: [OrganizeRow] {
         library.visibleTracks.enumerated()
             .map { OrganizeRow(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
+            .filter { row in keyFilter.map { f in row.analysis.map(KeySlot.init) == f } ?? true }
             .sorted(using: sortOrder)
+    }
+
+    /// The wheel counts everything in the list, not only the filtered key.
+    private var wheelRows: [OrganizeRow] {
+        library.visibleTracks.enumerated()
+            .map { OrganizeRow(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
     }
 
     /// The track the right-hand panel talks about.
@@ -77,15 +85,16 @@ struct OrganizeView: View {
                     .frame(minHeight: 200)
             }
             VStack(spacing: 1) {
-                KeyEnergyMap(rows: rows, focused: focused, select: { selection = [$0] })
-                    .frame(minHeight: 240)
-                NextTracksPanel(focused: focused, rows: rows, model: model, select: { selection = [$0] })
+                KeyWheel(rows: wheelRows, focused: focused, filter: $keyFilter)
+                    .frame(minHeight: 300)
+                NextTracksPanel(focused: focused, rows: wheelRows, model: model, select: { selection = [$0] })
                     .frame(height: 300)
             }
             .frame(width: 400)
         }
         .background(Theme.line)
         .onChange(of: library.playlist) { sortOrder = [KeyPathComparator(\OrganizeRow.index)] }
+        .onChange(of: library.crate) { keyFilter = nil }
     }
 
     private var toolbar: some View {
@@ -335,102 +344,169 @@ private struct NextTracksPanel: View {
     }
 }
 
-// MARK: Key map
+// MARK: Key wheel
 
-/// Key colour across (the 12 colours of the wheel), energy up. Dark keys
-/// are filled dots, Bright keys rings. The selected track is accent; tracks
-/// that mix with it are ringed green.
-struct KeyEnergyMap: View {
+/// A key: wheel position 1–12 and mood (minor = Dark).
+struct KeySlot: Hashable {
+    let number: Int
+    let minor: Bool
+    init(number: Int, minor: Bool) { self.number = number; self.minor = minor }
+    init(_ a: TrackAnalysis) { number = a.camelotNumber; minor = a.keyMinor }
+    var label: String { "\(number) \(KeyStyle.mood(minor: minor))" }
+}
+
+/// The 12 key colours as a wheel: Bright keys in the outer ring, Dark keys
+/// in the inner ring. Each slice shows how many tracks are in that key.
+/// With a track selected, its slice is outlined in accent and the slices
+/// that mix with it in green; the rest fade. Click a slice to show only
+/// its tracks.
+struct KeyWheel: View {
     let rows: [OrganizeRow]
     let focused: URL?
-    let select: (URL) -> Void
-    @State private var hovered: OrganizeRow?
+    @Binding var filter: KeySlot?
+    @State private var hovered: KeySlot?
+
+    private var counts: [KeySlot: Int] {
+        var c: [KeySlot: Int] = [:]
+        for row in rows { if let a = row.analysis { c[KeySlot(a), default: 0] += 1 } }
+        return c
+    }
+
+    private var focusedSlot: KeySlot? {
+        rows.first { $0.id == focused }?.analysis.map(KeySlot.init)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                LabelText("Key map")
+                LabelText("Key wheel")
                 Spacer()
-                Text(hovered.map { "\($0.name) · energy \($0.energy)" } ?? "● Dark   ○ Bright · neighbours mix well")
-                    .font(Theme.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                if let filter {
+                    Button {
+                        self.filter = nil
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle().fill(KeyStyle.color(number: filter.number, minor: filter.minor)).frame(width: 8, height: 8)
+                            Text("Showing \(filter.label)")
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                        }
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Theme.control)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show all keys again")
+                }
             }
             .padding(.horizontal, Theme.space3)
             .frame(height: 34)
             .background(Theme.panelRaised)
             GeometryReader { geo in
-                let plot = CGRect(x: 40, y: 8, width: geo.size.width - 52, height: geo.size.height - 36)
-                ZStack(alignment: .topLeading) {
-                    Canvas { context, _ in draw(context, plot) }
-                    ForEach(placed(in: plot), id: \.row.id) { item in
-                        Circle()
-                            .fill(Color.clear)
-                            .contentShape(Circle())
-                            .frame(width: 14, height: 14)
-                            .position(item.point)
-                            .onHover { inside in hovered = inside ? item.row : (hovered?.id == item.row.id ? nil : hovered) }
-                            .onTapGesture { select(item.row.id) }
+                let size = min(geo.size.width, geo.size.height)
+                let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+                let radius = size / 2 - 22
+                Canvas { context, _ in draw(context, centre: centre, radius: radius) }
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        if case .active(let p) = phase { hovered = slot(at: p, centre: centre, radius: radius) } else { hovered = nil }
                     }
+                    .onTapGesture(coordinateSpace: .local) { p in
+                        guard let s = slot(at: p, centre: centre, radius: radius) else { return }
+                        filter = filter == s ? nil : s
+                    }
+            }
+            .padding(Theme.space2)
+            Text(caption)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.inkMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.space3)
+                .padding(.bottom, Theme.space2)
+        }
+        .background(Theme.panel)
+    }
+
+    private var caption: String {
+        if let h = hovered {
+            let n = counts[h] ?? 0
+            return "Key \(h.label): \(n) track\(n == 1 ? "" : "s"). Click to \(filter == h ? "show all keys" : "show only these")."
+        }
+        if focusedSlot != nil {
+            return "Orange: the selected track. Green: keys that mix with it."
+        }
+        return "Outer ring: Bright keys · inner ring: Dark keys. Neighbouring slices mix well. Click a slice to show its tracks."
+    }
+
+    // Rings as fractions of the radius.
+    private let inner: CGFloat = 0.30, middle: CGFloat = 0.64
+
+    private func angle(_ number: Int) -> Double { Double(number - 1) * 30 - 90 }   // 1 at the top, clockwise
+
+    private func slot(at p: CGPoint, centre: CGPoint, radius: CGFloat) -> KeySlot? {
+        let dx = p.x - centre.x, dy = p.y - centre.y
+        let r = (dx * dx + dy * dy).squareRoot() / radius
+        guard r >= inner && r <= 1 else { return nil }
+        var deg = atan2(Double(dy), Double(dx)) * 180 / .pi + 90 + 15
+        deg = deg.truncatingRemainder(dividingBy: 360)
+        if deg < 0 { deg += 360 }
+        return KeySlot(number: Int(deg / 30) % 12 + 1, minor: r < middle)
+    }
+
+    private func sector(_ s: KeySlot, centre: CGPoint, radius: CGFloat) -> Path {
+        let a0 = Angle.degrees(angle(s.number) - 15 + 0.8), a1 = Angle.degrees(angle(s.number) + 15 - 0.8)
+        let r0 = radius * (s.minor ? inner : middle) + 1, r1 = radius * (s.minor ? middle : 1) - 1
+        var path = Path()
+        path.addArc(center: centre, radius: r1, startAngle: a0, endAngle: a1, clockwise: false)
+        path.addArc(center: centre, radius: r0, startAngle: a1, endAngle: a0, clockwise: true)
+        path.closeSubpath()
+        return path
+    }
+
+    private func point(_ number: Int, _ r: CGFloat, centre: CGPoint) -> CGPoint {
+        let a: Double = angle(number) * Double.pi / 180
+        return CGPoint(x: centre.x + CGFloat(Foundation.cos(a)) * r, y: centre.y + CGFloat(Foundation.sin(a)) * r)
+    }
+
+    private func draw(_ context: GraphicsContext, centre: CGPoint, radius: CGFloat) {
+        let counts = counts
+        let most = max(counts.values.max() ?? 1, 1)
+        let focus = focusedSlot
+        var mixes = Set<KeySlot>()
+        if let f = focus {
+            mixes.insert(f)
+            mixes.insert(KeySlot(number: f.number, minor: !f.minor))
+            mixes.insert(KeySlot(number: f.number % 12 + 1, minor: f.minor))
+            mixes.insert(KeySlot(number: (f.number + 10) % 12 + 1, minor: f.minor))
+        }
+
+        for n in 1...12 {
+            for minor in [true, false] {
+                let s = KeySlot(number: n, minor: minor)
+                let count = counts[s] ?? 0
+                let path = sector(s, centre: centre, radius: radius)
+                let dimmed = (focus != nil && !mixes.contains(s)) || (filter != nil && filter != s)
+                let strength = count == 0 ? 0.18 : 0.6 + 0.4 * Double(count) / Double(most)
+                context.fill(path, with: .color(KeyStyle.color(number: n, minor: minor).opacity(strength * (dimmed ? 0.35 : 1))))
+                if s == hovered { context.stroke(path, with: .color(Theme.ink), lineWidth: 1.5) }
+                if let focus, mixes.contains(s) && s != focus { context.stroke(path, with: .color(Theme.match), lineWidth: 2) }
+                if s == focus || s == filter { context.stroke(path, with: .color(Theme.accent), lineWidth: 2.5) }
+                if count > 0 {
+                    let mid = radius * (minor ? (inner + middle) / 2 : (middle + 1) / 2)
+                    var label = context
+                    label.addFilter(.shadow(color: .black.opacity(dimmed ? 0 : 0.6), radius: 2))
+                    label.draw(Text("\(count)").font(Theme.readout).foregroundStyle(dimmed ? Theme.inkMuted : .white),
+                               at: point(n, mid, centre: centre))
                 }
             }
-            .background(Theme.panel)
+            // Wheel number outside the ring.
+            context.draw(Text("\(n)").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted),
+                         at: point(n, radius + 12, centre: centre))
         }
-    }
-
-    private struct Placed { let row: OrganizeRow; let point: CGPoint }
-
-    private func placed(in plot: CGRect) -> [Placed] {
-        var cellCount: [String: Int] = [:]
-        return rows.compactMap { row in
-            guard let a = row.analysis else { return nil }
-            let cell = "\(a.camelotNumber)\(a.keyMinor)\(a.energy)"
-            let n = cellCount[cell, default: 0]
-            cellCount[cell] = n + 1
-            let colW = plot.width / 12, rowH = plot.height / 10
-            let half = colW / 2
-            let x = plot.minX + CGFloat(a.camelotNumber - 1) * colW + (a.keyMinor ? half * 0.5 : half * 1.5)
-            let y = plot.maxY - (CGFloat(a.energy) - 0.5) * rowH
-            let jitter = CGFloat(n) * 5
-            return Placed(row: row, point: CGPoint(x: x + (n % 2 == 0 ? jitter / 2 : -jitter / 2), y: y - CGFloat(n / 2) * 5))
-        }
-    }
-
-    private func draw(_ context: GraphicsContext, _ plot: CGRect) {
-        let colW = plot.width / 12, rowH = plot.height / 10
-        // A faint band of each key colour, so neighbours read as similar.
-        for c in 1...12 {
-            let band = CGRect(x: plot.minX + CGFloat(c - 1) * colW, y: plot.minY, width: colW, height: plot.height)
-            context.fill(Path(band), with: .color(KeyStyle.color(number: c, minor: true).opacity(0.07)))
-            context.fill(Path(CGRect(x: band.minX + 2, y: plot.maxY + 4, width: colW - 4, height: 5)),
-                         with: .color(KeyStyle.color(number: c, minor: true)))
-            context.draw(Text("\(c)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint),
-                         at: CGPoint(x: band.midX, y: plot.maxY + 18))
-        }
-        var grid = Path()
-        for c in 0...12 { grid.addRect(CGRect(x: plot.minX + CGFloat(c) * colW, y: plot.minY, width: 1, height: plot.height)) }
-        for r in [0, 5, 10] { grid.addRect(CGRect(x: plot.minX, y: plot.minY + CGFloat(r) * rowH, width: plot.width, height: 1)) }
-        context.fill(grid, with: .color(Theme.line.opacity(0.6)))
-        context.draw(Text("Peak").font(Theme.caption).foregroundStyle(Theme.inkFaint),
-                     at: CGPoint(x: plot.minX - 20, y: plot.minY + rowH * 0.5))
-        context.draw(Text("Calm").font(Theme.caption).foregroundStyle(Theme.inkFaint),
-                     at: CGPoint(x: plot.minX - 20, y: plot.maxY - rowH * 0.5))
-
-        let focusedAnalysis = rows.first { $0.id == focused }?.analysis
-        for item in placed(in: plot) {
-            guard let a = item.row.analysis else { continue }
-            let rect = CGRect(x: item.point.x - 4, y: item.point.y - 4, width: 8, height: 8)
-            let isFocused = item.row.id == focused
-            let mixes = focusedAnalysis.map { !isFocused && Compatibility.mixes($0, a) } ?? false
-            let dimmed = focusedAnalysis != nil && !isFocused && !mixes
-            let color = isFocused ? Theme.accent : KeyStyle.color(a).opacity(dimmed ? 0.3 : 1)
-            if a.keyMinor {
-                context.fill(Path(ellipseIn: rect), with: .color(color))
-            } else {
-                context.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 1.5)
-            }
-            if mixes {
-                context.stroke(Path(ellipseIn: rect.insetBy(dx: -3, dy: -3)), with: .color(Theme.match), lineWidth: 1.5)
-            }
-        }
+        context.draw(Text("BRIGHT").font(Theme.label).foregroundStyle(Theme.inkFaint),
+                     at: CGPoint(x: centre.x, y: centre.y - radius * 0.08))
+        context.draw(Text("DARK").font(Theme.label).foregroundStyle(Theme.inkFaint),
+                     at: CGPoint(x: centre.x, y: centre.y + radius * 0.10))
     }
 }
 

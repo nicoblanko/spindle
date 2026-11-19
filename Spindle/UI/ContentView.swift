@@ -96,6 +96,7 @@ extension ContentView {
                 model.setSimulatedPitch(1, deck: model.decks[0])
             }
             model.selectForPrep(tracks[0].url)
+            model.organizeSelection = [tracks[0].url]
             model.highlightedClip = tracks[2 % tracks.count].url
         }
         // Playlist test: a folder with a playlist holding library tracks and
