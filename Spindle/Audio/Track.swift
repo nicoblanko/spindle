@@ -123,6 +123,45 @@ nonisolated enum TrackLoader {
         return (peaks.map { $0 / maxPeak }, rms.map { min(1, $0 * 1.5 / maxPeak) })
     }
 
+    /// Decodes only `duration` seconds from `start` (a clip's bars), at the
+    /// device's sample rate. The caller frees the result.
+    static func loadRegion(url: URL, sampleRate: Double, start: Double, duration: Double) throws -> UnsafeMutablePointer<TrackSamples> {
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let format = file.processingFormat
+        let first = AVAudioFramePosition(max(0, start) * format.sampleRate)
+        let count = AVAudioFrameCount(min(Double(file.length - first), duration * format.sampleRate))
+        guard first < file.length, count > 0,
+              let source = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
+            throw TrackLoadError.unreadable("region outside the track")
+        }
+        file.framePosition = first
+        try file.read(into: source, frameCount: count)
+        guard let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 2, interleaved: false),
+              let converter = AVAudioConverter(from: format, to: target),
+              let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: AVAudioFrameCount(Double(count) * sampleRate / format.sampleRate) + 4096) else {
+            throw TrackLoadError.unreadable("unsupported format")
+        }
+        if format.channelCount == 1 { converter.channelMap = [0, 0] }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: output, error: &error) { _, status in
+            if fed { status.pointee = .endOfStream; return nil }
+            fed = true
+            status.pointee = .haveData
+            return source
+        }
+        if let error { throw error }
+        let frames = Int(output.frameLength)
+        guard frames > 0, let channels = output.floatChannelData else { throw TrackLoadError.unreadable("empty region") }
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        left.update(from: channels[0], count: frames)
+        right.update(from: channels[1], count: frames)
+        let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+        samples.initialize(to: TrackSamples(left: left, right: right, frames: frames, sampleRate: sampleRate))
+        return samples
+    }
+
     private static func metadata(url: URL) async -> (String, String) {
         let asset = AVURLAsset(url: url)
         var title = url.deletingPathExtension().lastPathComponent
