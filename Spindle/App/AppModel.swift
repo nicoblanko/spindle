@@ -89,6 +89,24 @@ final class AppModel {
     var error: String?
     let decks = [DeckModel(id: 0), DeckModel(id: 1)]
     let library = LibraryModel()
+    let analysis = AnalysisStore()
+    /// Remembered between launches.
+    var page: Page = Page(rawValue: UserDefaults.standard.string(forKey: "page") ?? "") ?? .mix {
+        didSet { UserDefaults.standard.set(page.rawValue, forKey: "page") }
+    }
+
+    enum Page: String, CaseIterable, Identifiable {
+        case organize = "Organize", prep = "Prep", mix = "Mix", sessions = "Sessions"
+        var id: String { rawValue }
+        /// Pages built so far (build order in CLAUDE.md).
+        var available: Bool { self == .organize || self == .mix }
+    }
+
+    /// Scans the music folder, then analyses anything new.
+    func refreshLibrary() async {
+        await library.rescan()
+        await analysis.analyze(library.tracks.map(\.url))
+    }
     /// The deck whose Load… button opened the file picker. There is one picker
     /// for the window: SwiftUI only runs one `.fileImporter` among sibling views.
     var importTarget: DeckModel?

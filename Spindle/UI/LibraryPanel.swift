@@ -14,7 +14,7 @@ struct LibraryPanel: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            crateList
+            CrateList(library: library, model: model)
                 .frame(width: 180)
             VStack(spacing: 0) {
                 toolbar
@@ -23,44 +23,6 @@ struct LibraryPanel: View {
             }
         }
         .background(Theme.line)
-        .task { if library.tracks.isEmpty { await library.rescan() } }
-    }
-
-    private var crateList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            LabelText("Crates")
-                .padding(.horizontal, Theme.space3)
-                .padding(.vertical, Theme.space2)
-            crateRow(nil, title: "All tracks", count: library.tracks.count)
-            ForEach(library.crates, id: \.self) { crate in
-                crateRow(crate, title: crate, count: library.tracks.filter { $0.crate == crate }.count)
-            }
-            Spacer(minLength: 0)
-            Button("Choose folder…") { Task { await library.chooseFolder() } }
-                .buttonStyle(FlatButtonStyle())
-                .padding(Theme.space2)
-        }
-        .frame(maxHeight: .infinity)
-        .background(Theme.panel)
-    }
-
-    private func crateRow(_ crate: String?, title: String, count: Int) -> some View {
-        let selected = library.crate == crate
-        return Button {
-            library.crate = crate
-        } label: {
-            HStack {
-                Text(title).font(Theme.body).lineLimit(1)
-                Spacer()
-                Text("\(count)").font(Theme.readoutSm)
-            }
-            .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
-            .padding(.horizontal, Theme.space3)
-            .padding(.vertical, 5)
-            .background(selected ? Theme.accentSoft : Color.clear)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private var toolbar: some View {
@@ -113,6 +75,15 @@ private struct TrackRow: View {
                 .foregroundStyle(isLoaded ? Theme.ink : Theme.inkMuted)
                 .lineLimit(1)
             Spacer()
+            if let a = model.analysis.analysis(for: track.url) {
+                Text(String(format: "%.1f", a.bpm)).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
+                    .frame(width: 48, alignment: .trailing)
+                Text(a.camelot).font(Theme.readoutSm)
+                    .foregroundStyle(a.keyConfidence < 0.02 ? Theme.inkFaint : Theme.inkMuted)
+                    .frame(width: 30, alignment: .trailing)
+                Text("E\(a.energy)").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
+                    .frame(width: 30, alignment: .trailing)
+            }
             Text(track.crate).font(Theme.caption).foregroundStyle(Theme.inkFaint)
             Text(track.format).font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
                 .frame(width: 40, alignment: .trailing)

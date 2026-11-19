@@ -25,23 +25,30 @@ struct ContentView: View {
                     .padding(Theme.space2)
                     .background(Theme.warn.opacity(0.25))
             }
-            LibraryPanel(library: model.library, model: model)
-                .frame(minHeight: 180, idealHeight: 240, maxHeight: 280)
-            Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 1) {
-                ForEach(model.decks) { deck in
-                    DeckPanel(deck: deck, model: model)
+            switch model.page {
+            case .organize:
+                OrganizeView(library: model.library, analysis: model.analysis, model: model)
+                    .frame(maxHeight: .infinity)
+            default:
+                LibraryPanel(library: model.library, model: model)
+                    .frame(minHeight: 180, idealHeight: 240, maxHeight: 280)
+                Rectangle().fill(Theme.line).frame(height: 1)
+                HStack(spacing: 1) {
+                    ForEach(model.decks) { deck in
+                        DeckPanel(deck: deck, model: model)
+                    }
                 }
+                .frame(maxHeight: .infinity)
+                .background(Theme.line)
             }
-            .frame(maxHeight: .infinity)
-            .background(Theme.line)
             Rectangle().fill(Theme.line).frame(height: 1)
-            PageBar()
+            PageBar(page: $model.page)
         }
         .background(Theme.bg)
         .preferredColorScheme(.dark)
         .frame(minWidth: 1100, minHeight: 820)
         .task { await model.start() }
+        .task { await model.refreshLibrary() }
         .fileImporter(
             isPresented: $model.showingImporter,
             allowedContentTypes: [.audio]
@@ -118,23 +125,32 @@ private struct TopBar: View {
     }
 }
 
-/// Bottom page bar like Resolve. Only Mix is built in this step.
+/// Bottom page bar like Resolve. Pages not built yet are dimmed.
 private struct PageBar: View {
-    private let pages = ["Organize", "Prep", "Mix", "Sessions"]
+    @Binding var page: AppModel.Page
+
     var body: some View {
         HStack(spacing: Theme.space4) {
             Spacer()
-            ForEach(pages, id: \.self) { page in
-                let active = page == "Mix"
-                VStack(spacing: 3) {
-                    Text(page)
-                        .font(Theme.label)
-                        .foregroundStyle(active ? Theme.accent : Theme.inkFaint)
-                    Rectangle()
-                        .fill(active ? Theme.accent : .clear)
-                        .frame(width: 24, height: 2)
+            ForEach(AppModel.Page.allCases) { p in
+                let active = p == page
+                Button {
+                    if p.available { page = p }
+                } label: {
+                    VStack(spacing: 3) {
+                        Text(p.rawValue)
+                            .font(Theme.label)
+                            .foregroundStyle(active ? Theme.accent : (p.available ? Theme.inkMuted : Theme.inkFaint.opacity(0.5)))
+                        Rectangle()
+                            .fill(active ? Theme.accent : .clear)
+                            .frame(width: 24, height: 2)
+                    }
+                    .padding(.horizontal, Theme.space2)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, Theme.space2)
+                .buttonStyle(.plain)
+                .disabled(!p.available)
+                .help(p.available ? p.rawValue : "\(p.rawValue): coming in a later build step")
             }
             Spacer()
         }
