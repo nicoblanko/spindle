@@ -13,8 +13,12 @@ All four pages work:
   12-colour wheel plus a mood (Dark = minor, Bright = major): neighbouring
   colours mix well. For a selected track, "Good next tracks" lists what
   mixes after it (same key, lift, drop, mood change). Playlists and
-  folders for sets, holding tracks from anywhere on disk; they can be the
-  Mix page's columns.
+  folders for sets, holding tracks from anywhere on disk. Tags: your own
+  (put on by hand) and tempo groups (a BPM range, optionally energy and
+  mood, that tracks join by themselves); "Make tempo groups" splits the
+  library into ranges no wider than 6% so every track in a group mixes
+  with the others. Playlists, tags or folders can be the Mix page's
+  columns.
 - **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.

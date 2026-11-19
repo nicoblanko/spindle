@@ -31,24 +31,39 @@ final class LibraryModel {
     private(set) var scanning = false
     /// Selected folder crate (nil with no playlist selected = all tracks).
     var crate: String? {
-        didSet { if crate != nil { playlist = nil } }
+        didSet { if crate != nil { playlist = nil; tag = nil } }
     }
     /// Selected playlist or playlist folder.
     var playlist: UUID? {
-        didSet { if playlist != nil { crate = nil } }
+        didSet { if playlist != nil { crate = nil; tag = nil } }
+    }
+    /// Selected tag or tempo group.
+    var tag: UUID? {
+        didSet { if tag != nil { crate = nil; playlist = nil } }
     }
     var search = ""
     let playlists = PlaylistStore()
+    let tags = TagStore()
+    /// Analysis for a track (set by the app), so tempo groups can match.
+    var analysisLookup: (URL) -> TrackAnalysis? = { _ in nil }
 
     func selectAll() {
         crate = nil
         playlist = nil
+        tag = nil
     }
 
     /// Name of the current selection.
     var selectionName: String {
         if let node = playlists.node(playlist) { return playlists.path(of: node) }
+        if let t = tags.tag(tag) { return "Tag: \(t.name)" }
         return crate ?? "All tracks"
+    }
+
+    /// Every track (music folder and playlists) with this tag.
+    func tracks(withTag id: UUID) -> [LibraryTrack] {
+        guard let t = tags.tag(id) else { return [] }
+        return allTracks.filter { tags.has(t, path: $0.url.path, analysis: analysisLookup($0.url)) }
     }
 
     /// The playlist being shown, if a single playlist (not a folder) is selected.
@@ -91,7 +106,9 @@ final class LibraryModel {
     var crates: [String] { Array(Set(tracks.map(\.crate))).sorted() }
 
     var visibleTracks: [LibraryTrack] {
-        let source = playlist.map(tracks(inPlaylist:)) ?? tracks.filter { crate == nil || $0.crate == crate }
+        let source = playlist.map(tracks(inPlaylist:))
+            ?? tag.map(tracks(withTag:))
+            ?? tracks.filter { crate == nil || $0.crate == crate }
         return search.isEmpty ? source : source.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }
 

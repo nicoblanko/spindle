@@ -91,6 +91,11 @@ private struct ClipGrid: View {
     private var usePlaylists: Bool { columnSource == "playlists" && !library.playlists.playlists.isEmpty }
 
     private var columns: [Column] {
+        if columnSource == "tags" && !library.tags.tags.isEmpty {
+            return library.tags.sorted.map { tag in
+                Column(id: tag.id.uuidString, title: tag.name, tracks: library.tracks(withTag: tag.id), ordered: false)
+            }
+        }
         if usePlaylists {
             return library.playlists.playlists.map { item in
                 Column(id: item.node.id.uuidString, title: item.path,
@@ -140,11 +145,11 @@ private struct ClipGrid: View {
             Spacer()
             Picker("Columns", selection: $columnSource) {
                 Text("Playlists").tag("playlists")
+                Text("Tags").tag("tags")
                 Text("Music folders").tag("folders")
             }
             .pickerStyle(.segmented)
-            .frame(width: 220)
-            .disabled(library.playlists.playlists.isEmpty)
+            .frame(width: 280)
             .help(library.playlists.playlists.isEmpty ? "Make playlists on the Organize page to use them as columns" : "What the columns show")
             Toggle("Matches only", isOn: $onlyMatches).toggleStyle(.checkbox)
             Toggle("Mix-ready only", isOn: $onlyReady).toggleStyle(.checkbox)

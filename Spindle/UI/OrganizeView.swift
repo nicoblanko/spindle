@@ -152,10 +152,12 @@ struct OrganizeView: View {
                 .width(80)
             TableColumn("Energy", value: \.energy) { EnergyBar(energy: $0.energy) }
                 .width(64)
+            TableColumn("Tags") { row in TagChips(tags: library.tags.tags(for: row.id.path, analysis: row.analysis)) }
+                .width(min: 60, ideal: 120)
             TableColumn("Intro", value: \.intro) { Text($0.intro).foregroundStyle(Theme.inkMuted) }
-                .width(70)
+                .width(64)
             TableColumn("Outro", value: \.outro) { Text($0.outro).foregroundStyle(Theme.inkMuted) }
-                .width(70)
+                .width(64)
             TableColumn("Length", value: \.duration) { row in
                 Text(row.analysis == nil ? "—" : Self.length(row.duration)).font(Theme.readoutSm)
             }
@@ -208,6 +210,22 @@ struct OrganizeView: View {
             Button("New playlist…") {
                 let id = library.playlists.create(name: "New playlist", folder: false, in: nil)
                 model.addToPlaylist(ordered, playlist: id)
+            }
+        }
+        Menu("Tags") {
+            let paths = ordered.map(\.path)
+            ForEach(library.tags.manualTags) { tag in
+                let all = paths.allSatisfy { library.tags.assigned[$0]?.contains(tag.id) == true }
+                Button {
+                    library.tags.set(tag.id, on: paths, !all)
+                } label: {
+                    Label(tag.name, systemImage: all ? "checkmark" : "circle")
+                }
+            }
+            if !library.tags.manualTags.isEmpty { Divider() }
+            Button("New tag…") {
+                let id = library.tags.create(name: "New tag")
+                library.tags.set(id, on: paths, true)
             }
         }
         if let playlist = library.selectedPlaylist {
@@ -510,6 +528,119 @@ struct KeyWheel: View {
     }
 }
 
+// MARK: Tags
+
+/// Small coloured tag labels for a table row or clip.
+struct TagChips: View {
+    let tags: [TagDef]
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(tags.prefix(3)) { tag in
+                Text(tag.name)
+                    .font(Theme.caption)
+                    .lineLimit(1)
+                    .foregroundStyle(Theme.onAccent)
+                    .padding(.horizontal, 4)
+                    .background(tag.color.opacity(0.85))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            }
+            if tags.count > 3 { Text("+\(tags.count - 3)").font(Theme.caption).foregroundStyle(Theme.inkFaint) }
+        }
+        .help(tags.map(\.name).joined(separator: ", "))
+    }
+}
+
+/// Make or change a tempo group: a BPM range (and optionally energy and
+/// mood) that tracks join by themselves.
+struct TempoGroupEditor: View {
+    @State var group: TagDef
+    let library: LibraryModel
+    let onSave: (TagDef) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var rule: TagRule { group.rule ?? TagRule() }
+
+    private func edit(_ change: (inout TagRule) -> Void) {
+        var r = rule
+        change(&r)
+        group.rule = r
+    }
+
+    private var matching: Int {
+        library.allTracks.filter { t in library.analysisLookup(t.url).map(rule.matches) ?? false }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.space3) {
+            Text(group.name.isEmpty ? "New tempo group" : group.name).font(Theme.title).foregroundStyle(Theme.ink)
+            Text("Tracks in this BPM range join the group by themselves, including ones you add later.")
+                .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+            TextField("Name (leave empty to use the range)", text: $group.name)
+                .textFieldStyle(.roundedBorder)
+            Grid(alignment: .leading, horizontalSpacing: Theme.space3, verticalSpacing: Theme.space2) {
+                GridRow {
+                    Text("From").foregroundStyle(Theme.inkMuted)
+                    Stepper(value: Binding(get: { rule.minBPM }, set: { v in edit { $0.minBPM = min(v, $0.maxBPM) } }), in: 60...200, step: 1) {
+                        Text(String(format: "%.0f BPM", rule.minBPM)).font(Theme.readout).frame(width: 90, alignment: .leading)
+                    }
+                }
+                GridRow {
+                    Text("To").foregroundStyle(Theme.inkMuted)
+                    Stepper(value: Binding(get: { rule.maxBPM }, set: { v in edit { $0.maxBPM = max(v, $0.minBPM) } }), in: 60...200, step: 1) {
+                        Text(String(format: "%.0f BPM", rule.maxBPM)).font(Theme.readout).frame(width: 90, alignment: .leading)
+                    }
+                }
+                GridRow {
+                    Text("Energy").foregroundStyle(Theme.inkMuted)
+                    HStack {
+                        Stepper("\(rule.minEnergy)", value: Binding(get: { rule.minEnergy }, set: { v in edit { $0.minEnergy = min(v, $0.maxEnergy) } }), in: 1...10)
+                        Text("to")
+                        Stepper("\(rule.maxEnergy)", value: Binding(get: { rule.maxEnergy }, set: { v in edit { $0.maxEnergy = max(v, $0.minEnergy) } }), in: 1...10)
+                    }
+                }
+                GridRow {
+                    Text("Mood").foregroundStyle(Theme.inkMuted)
+                    Picker("", selection: Binding(get: { rule.minor.map { $0 ? 1 : 2 } ?? 0 },
+                                                  set: { v in edit { $0.minor = v == 0 ? nil : v == 1 } })) {
+                        Text("Any").tag(0)
+                        Text("Dark").tag(1)
+                        Text("Bright").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 200)
+                }
+            }
+            .font(Theme.body)
+            HStack(spacing: Theme.space2) {
+                Image(systemName: rule.span <= 0.06 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(rule.span <= 0.06 ? Theme.match : Theme.warn)
+                Text(rule.span <= 0.06
+                     ? String(format: "Range %.1f%%: every track mixes with every other with a small tempo change.", rule.span * 100)
+                     : String(format: "Range %.1f%%: the outer tracks are far apart; keep it under 6%% for easy mixing.", rule.span * 100))
+                    .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+            }
+            Text("\(matching) tracks match").font(Theme.readoutSm).foregroundStyle(Theme.ink)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(FlatButtonStyle())
+                Button("Save") {
+                    var saved = group
+                    if saved.name.trimmingCharacters(in: .whitespaces).isEmpty { saved.name = String(format: "%.0f–%.0f BPM", rule.minBPM, rule.maxBPM) }
+                    saved.automatic = false
+                    onSave(saved)
+                    dismiss()
+                }
+                .buttonStyle(FlatButtonStyle(primary: true))
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Theme.space4)
+        .frame(width: 440)
+        .background(Theme.panel)
+        .preferredColorScheme(.dark)
+    }
+}
+
 // MARK: Sidebar
 
 /// Library (the music folder's subfolders) and playlists, shared by the
@@ -522,6 +653,8 @@ struct CrateList: View {
     @State private var collapsed = Set<UUID>()
     @State private var dropTarget: UUID?
     @State private var pendingDelete: PlaylistNode?
+    /// Tempo group being edited (or a new one).
+    @State private var editingGroup: TagDef?
 
     private var store: PlaylistStore { library.playlists }
 
@@ -564,6 +697,7 @@ struct CrateList: View {
                             .buttonStyle(FlatButtonStyle())
                             .padding(Theme.space3)
                     }
+                    tagSection
                 }
             }
             Button("Choose music folder…") {
@@ -591,6 +725,131 @@ struct CrateList: View {
             Text(pendingDelete?.isFolder == true
                  ? "The folder and the playlists in it are removed from Spindle. Your audio files stay where they are."
                  : "The playlist is removed from Spindle. Your audio files stay where they are.")
+        }
+    }
+
+    // MARK: Tags
+
+    private var tagStore: TagStore { library.tags }
+
+    @ViewBuilder
+    private var tagSection: some View {
+        HStack {
+            LabelText("Tags")
+            Spacer()
+            Menu {
+                Button("New tag") {
+                    let id = tagStore.create(name: "New tag")
+                    library.tag = id
+                    draft = "New tag"
+                    renaming = id
+                }
+                Button("New tempo group…") {
+                    editingGroup = TagDef(name: "", colorIndex: tagStore.tags.count, rule: TagRule())
+                }
+                Divider()
+                Button("Make tempo groups") { makeTempoGroups() }
+            } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("New tag or tempo group")
+        }
+        .padding(.horizontal, Theme.space3)
+        .padding(.top, Theme.space4)
+        .padding(.bottom, Theme.space2)
+        ForEach(tagStore.sorted) { tag in tagRow(tag) }
+        if tagStore.tags.isEmpty {
+            Text("Tags group tracks across folders. Tempo groups collect tracks in a BPM range that mix with each other.")
+                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                .padding(.horizontal, Theme.space3)
+            Button("Make tempo groups") { makeTempoGroups() }
+                .buttonStyle(FlatButtonStyle())
+                .padding(Theme.space3)
+                .help("Splits your tracks into BPM ranges no wider than 6%, so tracks in a group mix with a small tempo change")
+        }
+        EmptyView()
+            .sheet(item: $editingGroup) { group in
+                TempoGroupEditor(group: group, library: library) { saved in
+                    if tagStore.tag(saved.id) != nil { tagStore.update(saved) }
+                    else {
+                        let id = tagStore.create(name: saved.name, rule: saved.rule)
+                        library.tag = id
+                    }
+                }
+            }
+    }
+
+    private func makeTempoGroups() {
+        let bpms = library.allTracks.compactMap { library.analysisLookup($0.url)?.bpm }
+        tagStore.makeTempoGroups(bpms: bpms)
+    }
+
+    private func tagRow(_ tag: TagDef) -> some View {
+        let selected = library.tag == tag.id
+        let count = library.tracks(withTag: tag.id).count
+        return HStack(spacing: Theme.space1) {
+            Spacer().frame(width: 10)
+            Circle().fill(tag.color).frame(width: 8, height: 8).frame(width: 14)
+            if renaming == tag.id {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(Theme.body)
+                    .onSubmit {
+                        var t = tag
+                        let name = draft.trimmingCharacters(in: .whitespaces)
+                        if !name.isEmpty { t.name = name; tagStore.update(t) }
+                        renaming = nil
+                    }
+                    .onExitCommand { renaming = nil }
+            } else {
+                Text(tag.name).font(Theme.body).lineLimit(1)
+                if let rule = tag.rule, rule.minEnergy > 1 || rule.maxEnergy < 10 || rule.minor != nil {
+                    Image(systemName: "slider.horizontal.3").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)
+                }
+            }
+            Spacer()
+            Text("\(count)").font(Theme.readoutSm)
+        }
+        .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
+        .padding(.leading, Theme.space2)
+        .padding(.trailing, Theme.space3)
+        .padding(.vertical, 5)
+        .background(selected ? Theme.accentSoft : (dropTarget == tag.id ? Theme.panelRaised : Color.clear))
+        .overlay { if dropTarget == tag.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) } }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if tag.rule == nil { draft = tag.name; renaming = tag.id } else { editingGroup = tag }
+        }
+        .onTapGesture { library.tag = tag.id }
+        .help(tag.rule.map { "Tempo group: \($0.summary). Tracks join by themselves." } ?? "Your tag. Drag tracks here or right-click tracks › Tags.")
+        .dropDestination(for: URL.self) { urls, _ in
+            guard tag.rule == nil else { return false }
+            tagStore.set(tag.id, on: PlaylistStore.audioFiles(in: urls).map(\.path), true)
+            return true
+        } isTargeted: { inside in
+            if inside && tag.rule == nil { dropTarget = tag.id } else if dropTarget == tag.id { dropTarget = nil }
+        }
+        .contextMenu {
+            if tag.rule == nil {
+                Button("Rename") { draft = tag.name; renaming = tag.id }
+            } else {
+                Button("Edit range…") { editingGroup = tag }
+            }
+            Menu("Colour") {
+                ForEach(0..<TagStore.palette.count, id: \.self) { i in
+                    Button { var t = tag; t.colorIndex = i; tagStore.update(t) } label: {
+                        Label("Colour \(i + 1)", systemImage: tag.colorIndex % TagStore.palette.count == i ? "checkmark.circle.fill" : "circle.fill")
+                    }
+                }
+            }
+            Divider()
+            Button("Delete tag", role: .destructive) {
+                if library.tag == tag.id { library.selectAll() }
+                tagStore.delete(tag.id)
+            }
         }
     }
 

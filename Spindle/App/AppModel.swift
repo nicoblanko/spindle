@@ -173,6 +173,8 @@ final class AppModel {
             controlMode = (selectedDevice?.isXone ?? false) ? .vinyl : .laptop
         }
         setupMIDI()
+        let analysis = analysis
+        library.analysisLookup = { analysis.analysis(for: $0) }
     }
 
     func refreshDevices() {

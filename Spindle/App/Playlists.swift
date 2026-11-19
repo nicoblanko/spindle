@@ -147,9 +147,13 @@ final class PlaylistStore {
     /// Every track in any playlist.
     var allTrackPaths: Set<String> { Set(nodes.flatMap(\.tracks)) }
 
+    /// Writes in order on one queue, so a later save never loses to an
+    /// earlier one that finished late.
+    nonisolated private static let writer = DispatchQueue(label: "spindle.save.playlists", qos: .utility)
+
     private func save() {
         let snapshot = nodes
-        Task.detached(priority: .utility) {
+        Self.writer.async {
             if let data = try? JSONEncoder().encode(snapshot) {
                 try? data.write(to: Self.fileURL, options: .atomic)
             }

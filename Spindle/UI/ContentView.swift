@@ -113,6 +113,21 @@ extension ContentView {
             testFolder = folder
             try? await Task.sleep(for: .seconds(8))      // let the outside file be analysed
         }
+        // Tag test: tempo groups plus one hand-made tag; removed at the end.
+        var testTags: [UUID] = []
+        let savedColumns = UserDefaults.standard.string(forKey: "mix.columns")
+        if ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_TAGS"] != nil {
+            let store = model.library.tags
+            let before = Set(store.tags.map(\.id))
+            store.makeTempoGroups(bpms: model.library.allTracks.compactMap { model.analysis.analysis(for: $0.url)?.bpm })
+            let vocal = store.create(name: "vocal")
+            store.set(vocal, on: tracks.prefix(3).map(\.url.path), true)
+            testTags = store.tags.map(\.id).filter { !before.contains($0) }
+            let groups = store.tags.filter { $0.rule != nil }
+            spindleLog.notice("Tag test: \(groups.count) tempo groups: " + groups.map { "\($0.name) (\(model.library.tracks(withTag: $0.id).count))" }.joined(separator: ", "))
+            model.library.tag = groups.max { model.library.tracks(withTag: $0.id).count < model.library.tracks(withTag: $1.id).count }?.id
+            UserDefaults.standard.set("tags", forKey: "mix.columns")
+        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -135,6 +150,11 @@ extension ContentView {
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
+        if !testTags.isEmpty {
+            model.library.selectAll()
+            for id in testTags { model.library.tags.delete(id) }
+            UserDefaults.standard.set(savedColumns, forKey: "mix.columns")
+        }
         if let testFolder {
             model.library.selectAll()
             model.library.playlists.delete(testFolder)
