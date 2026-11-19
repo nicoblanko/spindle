@@ -31,15 +31,37 @@ final class LibraryModel {
     private(set) var scanning = false
     /// Selected folder crate (nil with no playlist selected = all tracks).
     var crate: String? {
-        didSet { if crate != nil { playlist = nil; tag = nil } }
+        didSet { if crate != nil { playlist = nil; tag = nil; smart = nil } }
     }
-    /// Selected playlist or playlist folder.
+    /// Selected playlist (set) or playlist folder.
     var playlist: UUID? {
-        didSet { if playlist != nil { crate = nil; tag = nil } }
+        didSet { if playlist != nil { crate = nil; tag = nil; smart = nil } }
     }
     /// Selected tag or tempo group.
     var tag: UUID? {
-        didSet { if tag != nil { crate = nil; playlist = nil } }
+        didSet { if tag != nil { crate = nil; playlist = nil; smart = nil } }
+    }
+    /// Selected smart list (Not prepped, Untagged, In no set).
+    var smart: SmartList? {
+        didSet { if smart != nil { crate = nil; playlist = nil; tag = nil } }
+    }
+    /// Whether a track is mix-ready on the Prep page (set by the app).
+    var isPrepped: (URL) -> Bool = { _ in false }
+
+    enum SmartList: String, CaseIterable, Identifiable {
+        case notPrepped = "Not prepped", untagged = "Untagged", inNoSet = "In no set"
+        var id: String { rawValue }
+    }
+
+    /// Music-folder tracks in a smart list.
+    func tracks(in smart: SmartList) -> [LibraryTrack] {
+        switch smart {
+        case .notPrepped: return tracks.filter { !isPrepped($0.url) }
+        case .untagged: return tracks.filter { tags.ids(for: $0.url.path).isEmpty }
+        case .inNoSet:
+            let inSets = playlists.allTrackPaths
+            return tracks.filter { !inSets.contains($0.url.path) }
+        }
     }
     var search = ""
     let playlists = PlaylistStore()
@@ -51,12 +73,14 @@ final class LibraryModel {
         crate = nil
         playlist = nil
         tag = nil
+        smart = nil
     }
 
     /// Name of the current selection.
     var selectionName: String {
         if let node = playlists.node(playlist) { return playlists.path(of: node) }
         if let t = tags.tag(tag) { return "Tag: \(t.name)" }
+        if let smart { return smart.rawValue }
         return crate ?? "All tracks"
     }
 
@@ -108,6 +132,7 @@ final class LibraryModel {
     var visibleTracks: [LibraryTrack] {
         let source = playlist.map(tracks(inPlaylist:))
             ?? tag.map(tracks(withTag:))
+            ?? smart.map(tracks(in:))
             ?? tracks.filter { crate == nil || $0.crate == crate }
         return search.isEmpty ? source : source.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }

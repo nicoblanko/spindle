@@ -8,21 +8,16 @@ Resolve (Organize, Prep, Mix, Sessions).
 
 All four pages work:
 
-- **Organize:** library from a folder (subfolders are crates), analysis of
-  BPM, key, energy, intro and outro type. Keys are shown as a colour on a
-  12-colour wheel plus a mood (Dark = minor, Bright = major): neighbouring
-  colours mix well. For a selected track, "Good next tracks" lists what
-  mixes after it (same key, lift, drop, mood change). Playlists and
-  folders for sets, holding tracks from anywhere on disk. The track list
-  is an Airtable-style grid: add your own fields (multiple select, single
-  select, text, number, checkbox, rating), edit cells in place, and
-  Filter (and/or conditions on any field), Group (collapsible sections)
-  and Sort. Tags is a built-in multiple-select field with Airtable's
-  option picker and colours. Tempo groups (a BPM range, optionally energy and
-  mood, that tracks join by themselves): "Make tempo groups" splits the
-  library into ranges no wider than 6% so every track in a group mixes
-  with the others. The Mix page's columns can be playlists, folders, or
-  one column per value of any field.
+- **Organize:** sort the library and build sets. Sidebar: All tracks and
+  smart lists (Not prepped, Untagged, In no set), folders, sets (with
+  Recently deleted), tags and tempo groups. The track list is an
+  Airtable-style grid (your own fields, filter, group, sort, saved views).
+  On the right, the set builder for the open set (running time, energy
+  and tempo curve, drag to reorder, the transition between each pair of
+  tracks, clashes in red), switching to the inspector for a selection
+  (tags incl. partial ones, sets, rating, notes, prep). Keys are written
+  as a number and mood ("8 Dark"); tracks already in the open set are
+  greyed in the list.
 - **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.

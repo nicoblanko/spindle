@@ -54,7 +54,6 @@ struct OrganizeView: View {
         Binding(get: { model.organizeSelection }, set: { model.organizeSelection = $0 })
     }
     @State private var dropTargeted = false
-    @State private var keyFilter: KeySlot?
     @State private var showFilter = false
     @State private var showGroup = false
     @State private var showHide = false
@@ -71,7 +70,6 @@ struct OrganizeView: View {
     private var baseRecords: [Record] {
         library.visibleTracks.enumerated()
             .map { Record(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
-            .filter { r in keyFilter.map { f in r.analysis.map(KeySlot.init) == f } ?? true }
     }
 
     /// After the view's filter and sort.
@@ -81,12 +79,6 @@ struct OrganizeView: View {
         records.map { OrganizeRow(track: $0.track, analysis: $0.analysis, index: $0.index) }
     }
 
-    /// The wheel counts everything in the list, not only the filtered key.
-    private var wheelRows: [OrganizeRow] {
-        library.visibleTracks.enumerated()
-            .map { OrganizeRow(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1) }
-    }
-
     /// The track the right-hand panel talks about.
     private var focused: URL? {
         selection.count == 1 ? selection.first : rows.first { selection.contains($0.id) }?.id
@@ -94,23 +86,17 @@ struct OrganizeView: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            CrateList(library: library, model: model)
+            CrateList(library: library, model: model, opensSets: true)
                 .frame(width: 210)
             VStack(spacing: 1) {
                 toolbar
                 grid
                     .frame(minHeight: 200)
             }
-            VStack(spacing: 1) {
-                KeyWheel(rows: wheelRows, focused: focused, filter: $keyFilter)
-                    .frame(minHeight: 300)
-                NextTracksPanel(focused: focused, rows: wheelRows, model: model, select: { selection = [$0] })
-                    .frame(height: 300)
-            }
-            .frame(width: 380)
+            OrganizePanel(model: model, library: library)
+                .frame(width: 400)
         }
         .background(Theme.line)
-        .onChange(of: library.crate) { keyFilter = nil }
     }
 
     private var toolbar: some View {
@@ -145,8 +131,8 @@ struct OrganizeView: View {
                     .help("Add audio files or folders from anywhere on your Mac")
             }
             if selection.count > 1 {
-                Button("New playlist from \(selection.count)") {
-                    let id = library.playlists.create(name: "New playlist", folder: false, in: nil)
+                Button("New set from \(selection.count)") {
+                    let id = library.playlists.create(name: "New set", folder: false, in: nil)
                     model.addToPlaylist(rows.filter { selection.contains($0.id) }.map(\.id), playlist: id)
                     library.playlist = id
                 }
@@ -254,17 +240,22 @@ struct OrganizeView: View {
         .buttonStyle(.plain)
     }
 
+    /// Tracks already in the open set are greyed in the list (not when the
+    /// list shows that set itself).
+    private var dimmedInSet: ((Record) -> Bool)? {
+        guard let set = model.openSetNode, library.playlist != set.id else { return nil }
+        let paths = Set(set.tracks)
+        return { paths.contains($0.path) }
+    }
+
     private var grid: some View {
-        let focusedAnalysis = focused.flatMap { analysis.analysis(for: $0) }
         return RecordGrid(
             model: model,
             records: records,
             view: viewBinding,
-            mixes: { r in
-                guard let a = focusedAnalysis, let b = r.analysis, r.id != focused else { return false }
-                return Compatibility.mixes(a, b)
-            },
-            menu: { AnyView(contextMenu($0)) })
+            mixes: { _ in false },
+            menu: { AnyView(contextMenu($0)) },
+            dimmed: dimmedInSet)
         .overlay {
             if dropTargeted { Rectangle().strokeBorder(Theme.accent, lineWidth: 2) }
         }
@@ -276,7 +267,7 @@ struct OrganizeView: View {
         .overlay {
             if library.visibleTracks.isEmpty && library.selectedPlaylist != nil && library.search.isEmpty {
                 VStack(spacing: Theme.space2) {
-                    Text("This playlist is empty").font(Theme.body).foregroundStyle(Theme.inkMuted)
+                    Text("This set is empty").font(Theme.body).foregroundStyle(Theme.inkMuted)
                     Text("Drag tracks here from All tracks, or files and folders from Finder, or use Add files….")
                         .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                 }
@@ -297,13 +288,13 @@ struct OrganizeView: View {
             Button("Load into deck B") { Task { await model.load(url: url, into: model.decks[1]) } }
             Divider()
         }
-        Menu("Add to playlist") {
+        Menu("Add to set") {
             ForEach(library.playlists.playlists, id: \.node.id) { item in
                 Button(item.path) { model.addToPlaylist(ordered, playlist: item.node.id) }
             }
             if !library.playlists.playlists.isEmpty { Divider() }
-            Button("New playlist…") {
-                let id = library.playlists.create(name: "New playlist", folder: false, in: nil)
+            Button("New set…") {
+                let id = library.playlists.create(name: "New set", folder: false, in: nil)
                 model.addToPlaylist(ordered, playlist: id)
             }
         }
@@ -361,265 +352,6 @@ struct EnergyBar: View {
             }
         }
         .help(energy > 0 ? "Energy \(energy) of 10 (1 = calm, 10 = peak time)" : "Not analysed yet")
-    }
-}
-
-// MARK: Next tracks
-
-/// For the selected track: which tracks would mix well after it, grouped by
-/// how (same key, lift, drop, mood change), with tempo and energy close.
-private struct NextTracksPanel: View {
-    let focused: URL?
-    let rows: [OrganizeRow]
-    let model: AppModel
-    let select: (URL) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                LabelText("Good next tracks")
-                Spacer()
-                if let url = focused, let a = model.analysis.analysis(for: url) {
-                    KeyChip(analysis: a)
-                    Text(String(format: "%.0f BPM · energy %d", a.bpm, a.energy))
-                        .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
-                }
-            }
-            .padding(.horizontal, Theme.space3)
-            .frame(height: 34)
-            .background(Theme.panelRaised)
-            if let url = focused, let a = model.analysis.analysis(for: url) {
-                let groups = suggestions(for: url, a)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.space3) {
-                        if groups.isEmpty {
-                            Text("Nothing in this list mixes easily after this track (key, tempo within 8% and energy within 2).")
-                                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                        }
-                        ForEach(groups, id: \.relation) { group in
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: Theme.space2) {
-                                    Text(group.relation.title).font(Theme.label).foregroundStyle(Theme.ink)
-                                    Text(group.relation.explanation).font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                                }
-                                ForEach(group.rows) { row in suggestion(row, from: a) }
-                            }
-                        }
-                    }
-                    .padding(Theme.space3)
-                }
-            } else {
-                Text("Select a track to see which tracks sound good after it.\n\n\(KeyStyle.explanation)\n\nEnergy runs from 1 (calm) to 10 (peak time).")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.inkMuted)
-                    .padding(Theme.space3)
-                Spacer(minLength: 0)
-            }
-        }
-        .background(Theme.panel)
-    }
-
-    private struct Group { let relation: MixRelation; let rows: [OrganizeRow] }
-
-    private func suggestions(for url: URL, _ a: TrackAnalysis) -> [Group] {
-        var byRelation: [MixRelation: [OrganizeRow]] = [:]
-        for row in rows where row.id != url {
-            guard let b = row.analysis, let relation = MixRelation.between(a, b),
-                  Compatibility.tempo(a.bpm, b.bpm), abs(a.energy - b.energy) <= 2 else { continue }
-            byRelation[relation, default: []].append(row)
-        }
-        return MixRelation.allCases.compactMap { relation in
-            guard let list = byRelation[relation], !list.isEmpty else { return nil }
-            // Closest tempo first.
-            let sorted = list.sorted { abs($0.bpm - a.bpm) < abs($1.bpm - a.bpm) }
-            return Group(relation: relation, rows: Array(sorted.prefix(8)))
-        }
-    }
-
-    private func suggestion(_ row: OrganizeRow, from a: TrackAnalysis) -> some View {
-        HStack(spacing: Theme.space2) {
-            KeyChip(analysis: row.analysis, showMood: false)
-            Text(row.name).font(Theme.caption).foregroundStyle(Theme.ink).lineLimit(1)
-            Spacer(minLength: 0)
-            Text(String(format: "%.0f", row.bpm)).font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
-            let delta = row.energy - a.energy
-            Text(delta == 0 ? "=" : (delta > 0 ? "↑\(delta)" : "↓\(-delta)"))
-                .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 22)
-                .help("Energy \(row.energy) (\(delta >= 0 ? "+" : "")\(delta))")
-        }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .onTapGesture { select(row.id) }
-        .contextMenu {
-            Button("Load into deck A") { Task { await model.load(url: row.id, into: model.decks[0]) } }
-            Button("Load into deck B") { Task { await model.load(url: row.id, into: model.decks[1]) } }
-        }
-    }
-}
-
-// MARK: Key wheel
-
-/// A key: wheel position 1–12 and mood (minor = Dark).
-struct KeySlot: Hashable {
-    let number: Int
-    let minor: Bool
-    init(number: Int, minor: Bool) { self.number = number; self.minor = minor }
-    init(_ a: TrackAnalysis) { number = a.camelotNumber; minor = a.keyMinor }
-    var label: String { "\(number) \(KeyStyle.mood(minor: minor))" }
-}
-
-/// The 12 key colours as a wheel: Bright keys in the outer ring, Dark keys
-/// in the inner ring. Each slice shows how many tracks are in that key.
-/// With a track selected, its slice is outlined in accent and the slices
-/// that mix with it in green; the rest fade. Click a slice to show only
-/// its tracks.
-struct KeyWheel: View {
-    let rows: [OrganizeRow]
-    let focused: URL?
-    @Binding var filter: KeySlot?
-    @State private var hovered: KeySlot?
-
-    private var counts: [KeySlot: Int] {
-        var c: [KeySlot: Int] = [:]
-        for row in rows { if let a = row.analysis { c[KeySlot(a), default: 0] += 1 } }
-        return c
-    }
-
-    private var focusedSlot: KeySlot? {
-        rows.first { $0.id == focused }?.analysis.map(KeySlot.init)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                LabelText("Key wheel")
-                Spacer()
-                if let filter {
-                    Button {
-                        self.filter = nil
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle().fill(KeyStyle.color(number: filter.number, minor: filter.minor)).frame(width: 8, height: 8)
-                            Text("Showing \(filter.label)")
-                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                        }
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.ink)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Theme.control)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show all keys again")
-                }
-            }
-            .padding(.horizontal, Theme.space3)
-            .frame(height: 34)
-            .background(Theme.panelRaised)
-            GeometryReader { geo in
-                let size = min(geo.size.width, geo.size.height)
-                let centre = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                let radius = size / 2 - 22
-                Canvas { context, _ in draw(context, centre: centre, radius: radius) }
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        if case .active(let p) = phase { hovered = slot(at: p, centre: centre, radius: radius) } else { hovered = nil }
-                    }
-                    .onTapGesture(coordinateSpace: .local) { p in
-                        guard let s = slot(at: p, centre: centre, radius: radius) else { return }
-                        filter = filter == s ? nil : s
-                    }
-            }
-            .padding(Theme.space2)
-            Text(caption)
-                .font(Theme.caption)
-                .foregroundStyle(Theme.inkMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.space3)
-                .padding(.bottom, Theme.space2)
-        }
-        .background(Theme.panel)
-    }
-
-    private var caption: String {
-        if let h = hovered {
-            let n = counts[h] ?? 0
-            return "Key \(h.label): \(n) track\(n == 1 ? "" : "s"). Click to \(filter == h ? "show all keys" : "show only these")."
-        }
-        if focusedSlot != nil {
-            return "Orange: the selected track. Green: keys that mix with it."
-        }
-        return "Outer ring: Bright keys · inner ring: Dark keys. Neighbouring slices mix well. Click a slice to show its tracks."
-    }
-
-    // Rings as fractions of the radius.
-    private let inner: CGFloat = 0.30, middle: CGFloat = 0.64
-
-    private func angle(_ number: Int) -> Double { Double(number - 1) * 30 - 90 }   // 1 at the top, clockwise
-
-    private func slot(at p: CGPoint, centre: CGPoint, radius: CGFloat) -> KeySlot? {
-        let dx = p.x - centre.x, dy = p.y - centre.y
-        let r = (dx * dx + dy * dy).squareRoot() / radius
-        guard r >= inner && r <= 1 else { return nil }
-        var deg = atan2(Double(dy), Double(dx)) * 180 / .pi + 90 + 15
-        deg = deg.truncatingRemainder(dividingBy: 360)
-        if deg < 0 { deg += 360 }
-        return KeySlot(number: Int(deg / 30) % 12 + 1, minor: r < middle)
-    }
-
-    private func sector(_ s: KeySlot, centre: CGPoint, radius: CGFloat) -> Path {
-        let a0 = Angle.degrees(angle(s.number) - 15 + 0.8), a1 = Angle.degrees(angle(s.number) + 15 - 0.8)
-        let r0 = radius * (s.minor ? inner : middle) + 1, r1 = radius * (s.minor ? middle : 1) - 1
-        var path = Path()
-        path.addArc(center: centre, radius: r1, startAngle: a0, endAngle: a1, clockwise: false)
-        path.addArc(center: centre, radius: r0, startAngle: a1, endAngle: a0, clockwise: true)
-        path.closeSubpath()
-        return path
-    }
-
-    private func point(_ number: Int, _ r: CGFloat, centre: CGPoint) -> CGPoint {
-        let a: Double = angle(number) * Double.pi / 180
-        return CGPoint(x: centre.x + CGFloat(Foundation.cos(a)) * r, y: centre.y + CGFloat(Foundation.sin(a)) * r)
-    }
-
-    private func draw(_ context: GraphicsContext, centre: CGPoint, radius: CGFloat) {
-        let counts = counts
-        let most = max(counts.values.max() ?? 1, 1)
-        let focus = focusedSlot
-        var mixes = Set<KeySlot>()
-        if let f = focus {
-            mixes.insert(f)
-            mixes.insert(KeySlot(number: f.number, minor: !f.minor))
-            mixes.insert(KeySlot(number: f.number % 12 + 1, minor: f.minor))
-            mixes.insert(KeySlot(number: (f.number + 10) % 12 + 1, minor: f.minor))
-        }
-
-        for n in 1...12 {
-            for minor in [true, false] {
-                let s = KeySlot(number: n, minor: minor)
-                let count = counts[s] ?? 0
-                let path = sector(s, centre: centre, radius: radius)
-                let dimmed = (focus != nil && !mixes.contains(s)) || (filter != nil && filter != s)
-                let strength = count == 0 ? 0.18 : 0.6 + 0.4 * Double(count) / Double(most)
-                context.fill(path, with: .color(KeyStyle.color(number: n, minor: minor).opacity(strength * (dimmed ? 0.35 : 1))))
-                if s == hovered { context.stroke(path, with: .color(Theme.ink), lineWidth: 1.5) }
-                if let focus, mixes.contains(s) && s != focus { context.stroke(path, with: .color(Theme.match), lineWidth: 2) }
-                if s == focus || s == filter { context.stroke(path, with: .color(Theme.accent), lineWidth: 2.5) }
-                if count > 0 {
-                    let mid = radius * (minor ? (inner + middle) / 2 : (middle + 1) / 2)
-                    var label = context
-                    label.addFilter(.shadow(color: .black.opacity(dimmed ? 0 : 0.6), radius: 2))
-                    label.draw(Text("\(count)").font(Theme.readout).foregroundStyle(dimmed ? Theme.inkMuted : .white),
-                               at: point(n, mid, centre: centre))
-                }
-            }
-            // Wheel number outside the ring.
-            context.draw(Text("\(n)").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted),
-                         at: point(n, radius + 12, centre: centre))
-        }
-        context.draw(Text("BRIGHT").font(Theme.label).foregroundStyle(Theme.inkFaint),
-                     at: CGPoint(x: centre.x, y: centre.y - radius * 0.08))
-        context.draw(Text("DARK").font(Theme.label).foregroundStyle(Theme.inkFaint),
-                     at: CGPoint(x: centre.x, y: centre.y + radius * 0.10))
     }
 }
 
@@ -743,6 +475,8 @@ struct TempoGroupEditor: View {
 struct CrateList: View {
     @Bindable var library: LibraryModel
     let model: AppModel
+    /// Organize: clicking a set opens it in the right panel (the list stays).
+    var opensSets = false
     @State private var renaming: UUID?
     @State private var draft = ""
     @State private var collapsed = Set<UUID>()
@@ -752,6 +486,7 @@ struct CrateList: View {
     @State private var editingGroup: TagDef?
     @State private var editingTags = false
     @State private var showDeleted = false
+    @State private var showFolders = false
 
     private var store: PlaylistStore { library.playlists }
 
@@ -763,17 +498,35 @@ struct CrateList: View {
                         .padding(.horizontal, Theme.space3)
                         .padding(.vertical, Theme.space2)
                     plainRow(title: "All tracks", count: library.tracks.count,
-                             selected: library.crate == nil && library.playlist == nil) { library.selectAll() }
-                    ForEach(library.crates, id: \.self) { crate in
-                        plainRow(title: crate, count: library.tracks.filter { $0.crate == crate }.count,
-                                 selected: library.crate == crate, icon: "folder") { library.crate = crate }
+                             selected: library.crate == nil && library.playlist == nil && library.tag == nil && library.smart == nil) { library.selectAll() }
+                    ForEach(LibraryModel.SmartList.allCases) { smart in
+                        plainRow(title: smart.rawValue, count: library.tracks(in: smart).count,
+                                 selected: library.smart == smart, icon: "line.3.horizontal.decrease") { library.smart = smart }
                     }
-                    viewsSection
+                    Button { showFolders.toggle() } label: {
+                        HStack(spacing: Theme.space1) {
+                            Image(systemName: showFolders ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                            Image(systemName: "folder").font(.system(size: 11)).frame(width: 14)
+                            Text("Folders").font(Theme.body)
+                            Spacer()
+                            Text("\(library.crates.count)").font(Theme.readoutSm)
+                        }
+                        .foregroundStyle(Theme.inkMuted)
+                        .padding(.leading, Theme.space2).padding(.trailing, Theme.space3).padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if showFolders {
+                        ForEach(library.crates, id: \.self) { crate in
+                            plainRow(title: crate, count: library.tracks.filter { $0.crate == crate }.count,
+                                     selected: library.crate == crate, icon: "folder") { library.crate = crate }.padding(.leading, 14)
+                        }
+                    }
                     HStack {
-                        LabelText("Playlists")
+                        LabelText("Sets")
                         Spacer()
                         Menu {
-                            Button("New playlist") { create(folder: false, in: nil) }
+                            Button("New set") { create(folder: false, in: nil) }
                             Button("New folder") { create(folder: true, in: nil) }
                         } label: {
                             Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
@@ -789,10 +542,10 @@ struct CrateList: View {
                     tree(parent: nil, depth: 0)
                     recentlyDeleted
                     if store.nodes.isEmpty {
-                        Text("Make a playlist for each set. Add tracks from anywhere: drag them in, or right-click a track.")
+                        Text("Make a set for each gig or mix. Add tracks from anywhere: drag them in, or right-click a track.")
                             .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                             .padding(.horizontal, Theme.space3)
-                        Button("New playlist") { create(folder: false, in: nil) }
+                        Button("New set") { create(folder: false, in: nil) }
                             .buttonStyle(FlatButtonStyle())
                             .padding(Theme.space3)
                     }
@@ -1105,9 +858,9 @@ struct CrateList: View {
     }
 
     private func create(folder: Bool, in parent: UUID?) {
-        let id = store.create(name: folder ? "New folder" : "New playlist", folder: folder, in: parent)
+        let id = store.create(name: folder ? "New folder" : "New set", folder: folder, in: parent)
         if let parent { collapsed.remove(parent) }
-        if !folder { library.playlist = id }
+        if !folder { if opensSets { model.openSet = id } else { library.playlist = id } }
         draft = store.node(id)?.name ?? ""
         renaming = id
     }
@@ -1124,7 +877,7 @@ struct CrateList: View {
     }
 
     private func nodeRow(_ node: PlaylistNode, depth: Int) -> some View {
-        let selected = library.playlist == node.id
+        let selected = opensSets && !node.isFolder ? model.openSet == node.id : library.playlist == node.id
         return HStack(spacing: Theme.space1) {
             if node.isFolder {
                 Image(systemName: collapsed.contains(node.id) ? "chevron.right" : "chevron.down")
@@ -1161,7 +914,9 @@ struct CrateList: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { draft = node.name; renaming = node.id }
-        .onTapGesture { library.playlist = node.id }
+        .onTapGesture {
+            if opensSets && !node.isFolder { model.openSet = node.id } else { library.playlist = node.id }
+        }
         .dropDestination(for: URL.self) { urls, _ in
             guard !node.isFolder else { return false }
             model.addToPlaylist(urls, playlist: node.id)
@@ -1171,6 +926,9 @@ struct CrateList: View {
         }
         .contextMenu {
             Button("Rename") { draft = node.name; renaming = node.id }
+            if opensSets && !node.isFolder {
+                Button("Show as list") { library.playlist = node.id }
+            }
             if node.isFolder {
                 Button("New playlist inside") { create(folder: false, in: node.id) }
                 Button("New folder inside") { create(folder: true, in: node.id) }

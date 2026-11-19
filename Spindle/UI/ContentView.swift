@@ -190,6 +190,22 @@ extension ContentView {
             spindleLog.notice("Stack test: deck B \(model.decks[1].track?.title ?? "-"), queue \(model.stack.count), played \(model.played.count)")
             if let first = model.library.playlists.playlists.first { model.mixTab = first.node.id.uuidString }
         }
+        // Organize test: a set open in the panel, two tagged tracks; removed at the end.
+        var organizeSet: UUID?
+        var organizeTag: UUID?
+        let savedOpenSet = model.openSet
+        if ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_ORGANIZE"] != nil, tracks.count > 10 {
+            let store = model.library.playlists
+            let set = store.create(name: "Test set", folder: false, in: nil)
+            model.addToPlaylist(tracks[3..<9].map(\.url), playlist: set)
+            let tag = model.library.tags.create(name: "test-acid")
+            model.library.tags.set(tag, on: [tracks[0].url.path, tracks[1].url.path], true)
+            model.library.selectAll()
+            model.openSet = set
+            model.organizeSelection = [tracks[10].url]
+            organizeSet = set
+            organizeTag = tag
+        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -208,6 +224,14 @@ extension ContentView {
             view.cacheDisplay(in: view.bounds, to: rep)
             let url = URL(fileURLWithPath: dir).appendingPathComponent("\(page.rawValue).png")
             try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            if page == .organize && organizeSet != nil {
+                model.organizeSelection = Set(tracks.prefix(3).map(\.url))
+                try? await Task.sleep(for: .seconds(2))
+                if let rep2 = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep2)
+                    try? rep2.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("Organize-inspector.png"))
+                }
+            }
             spindleLog.notice("Snapshot: \(url.path)")
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
@@ -224,6 +248,15 @@ extension ContentView {
             model.organizeView = savedView
             UserDefaults.standard.set(savedColumns, forKey: "mix.columns")
             UserDefaults.standard.set(savedGroupField, forKey: "mix.groupField")
+        }
+        if let organizeSet {
+            model.library.playlists.delete(organizeSet)
+            if let entry = model.library.playlists.trash.first(where: { $0.nodes.first?.id == organizeSet }) {
+                model.library.playlists.purge(entry)
+            }
+            if let organizeTag { model.library.tags.delete(organizeTag) }
+            model.openSet = savedOpenSet
+            model.organizeSelection = []
         }
         if let testFolder {
             model.library.selectAll()

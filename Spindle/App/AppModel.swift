@@ -126,6 +126,8 @@ final class AppModel {
     let library = LibraryModel()
     let analysis = AnalysisStore()
     let prep = PrepStore()
+    /// Ratings and notes.
+    let meta = TrackMetaStore()
     /// Your own fields on the Organize grid.
     let fields = FieldStore()
     /// The Organize grid's filter, grouping, sort and hidden fields.
@@ -169,6 +171,10 @@ final class AppModel {
     var preparing = 0
     /// The clip selected in the Mix grid (MIDI "load highlighted clip").
     var highlightedClip: URL?
+    /// The set open in Organize's right panel (its tracks are greyed in the list).
+    var openSet: UUID? = UserDefaults.standard.string(forKey: "organize.openSet").flatMap(UUID.init) {
+        didSet { UserDefaults.standard.set(openSet?.uuidString, forKey: "organize.openSet") }
+    }
     /// Tracks selected on the Organize page.
     var organizeSelection = Set<URL>()
     /// Remembered between launches.
@@ -211,6 +217,8 @@ final class AppModel {
         setupMIDI()
         let analysis = analysis
         library.analysisLookup = { analysis.analysis(for: $0) }
+        let prep = prep
+        library.isPrepped = { prep.prep(for: $0)?.mixReady == true }
     }
 
     func refreshDevices() {

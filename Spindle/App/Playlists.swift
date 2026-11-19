@@ -193,6 +193,21 @@ final class PlaylistStore {
         return unique.count
     }
 
+    /// Adds tracks at a position (dropping into a set); ones already there move.
+    func insert(_ urls: [URL], into id: UUID, at index: Int) {
+        guard let i = nodes.firstIndex(where: { $0.id == id }), !nodes[i].isFolder else { return }
+        let paths = urls.map(\.path)
+        var list = nodes[i].tracks
+        let before = list.prefix(index).filter { paths.contains($0) }.count
+        list.removeAll { paths.contains($0) }
+        let at = min(max(index - before, 0), list.count)
+        var seen = Set<String>()
+        list.insert(contentsOf: paths.filter { seen.insert($0).inserted }, at: at)
+        nodes[i].tracks = list
+        save()
+        spindleLog.notice("Playlists: put \(paths.count) track(s) into '\(nodes[i].name)' at \(at + 1)")
+    }
+
     func remove(_ urls: Set<URL>, from id: UUID) {
         guard let i = nodes.firstIndex(where: { $0.id == id }) else { return }
         let paths = Set(urls.map(\.path))

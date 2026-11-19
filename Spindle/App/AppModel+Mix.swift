@@ -25,6 +25,11 @@ final class PrepPageModel {
 }
 
 extension AppModel {
+    /// The set open in Organize's right panel, if it still exists.
+    var openSetNode: PlaylistNode? {
+        library.playlists.node(openSet).flatMap { $0.isFolder ? nil : $0 }
+    }
+
     // MARK: Saved views
 
     var currentView: SavedView? { savedViews.first { $0.id == currentViewID } }
