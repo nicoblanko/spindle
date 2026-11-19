@@ -84,7 +84,7 @@ nonisolated struct DiagnosticLog: Sendable {
     }
 }
 
-let spindleLog = DiagnosticLog()
+nonisolated let spindleLog = DiagnosticLog()
 
 @Observable
 final class AppModel {
