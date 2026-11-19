@@ -25,6 +25,58 @@ final class PrepPageModel {
 }
 
 extension AppModel {
+    // MARK: Saved views
+
+    var currentView: SavedView? { savedViews.first { $0.id == currentViewID } }
+
+    /// The grid differs from the saved view it came from.
+    var viewModified: Bool {
+        currentView.map { !organizeView.sameSetup(as: $0.settings) } ?? false
+    }
+
+    func applyView(_ id: UUID?) {
+        currentViewID = id
+        if let v = currentView {
+            var settings = v.settings
+            settings.collapsed = organizeView.collapsed
+            organizeView = settings
+        }
+    }
+
+    @discardableResult
+    func saveViewAs(_ name: String) -> UUID {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let view = SavedView(name: trimmed.isEmpty ? "View \(savedViews.count + 1)" : trimmed, settings: organizeView)
+        savedViews.append(view)
+        currentViewID = view.id
+        return view.id
+    }
+
+    func updateCurrentView() {
+        guard let i = savedViews.firstIndex(where: { $0.id == currentViewID }) else { return }
+        savedViews[i].settings = organizeView
+    }
+
+    func revertCurrentView() { applyView(currentViewID) }
+
+    func renameView(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let i = savedViews.firstIndex(where: { $0.id == id }) else { return }
+        savedViews[i].name = trimmed
+    }
+
+    func deleteView(_ id: UUID) {
+        savedViews.removeAll { $0.id == id }
+        if currentViewID == id { currentViewID = nil }
+    }
+
+    func duplicateView(_ id: UUID) {
+        guard let v = savedViews.first(where: { $0.id == id }) else { return }
+        let copy = SavedView(name: v.name + " copy", settings: v.settings)
+        savedViews.append(copy)
+        applyView(copy.id)
+    }
+
     // MARK: Playlists
 
     /// Adds files or folders (from anywhere) to a playlist, then analyses

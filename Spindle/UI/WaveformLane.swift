@@ -86,27 +86,43 @@ struct WaveformLane: View {
         context.fill(ticks, with: .color(Theme.line))
 
         if let track = deck.track, !track.peaks.isEmpty {
-            let peaks = track.peaks
-            let columnsPerPoint = secondsPerPoint * LoadedTrack.peaksPerSecond
-            let step: CGFloat = 2
-            var played = Path()
-            var ahead = Path()
-            var x: CGFloat = 0
-            while x < size.width {
-                let t0 = playhead + Double(x - centreX) * secondsPerPoint
-                let c0 = Int((t0 * LoadedTrack.peaksPerSecond).rounded(.down))
-                let c1 = max(c0 + 1, Int((Double(c0) + columnsPerPoint * Double(step)).rounded(.up)))
-                if c1 > 0 && c0 < peaks.count {
-                    var peak: Float = 0
-                    for c in max(c0, 0)..<min(c1, peaks.count) { peak = max(peak, peaks[c]) }
-                    let h = max(1, CGFloat(peak) * (mid - 6))
-                    let rect = CGRect(x: x, y: mid - h, width: step - 0.5, height: h * 2)
-                    if x < centreX { played.addRect(rect) } else { ahead.addRect(rect) }
+            // Columns are fixed to the track's timeline (not to the screen),
+            // so each one keeps its shape and glides past the playhead.
+            let peaks = track.peaks, rms = track.rms
+            let rate = LoadedTrack.peaksPerSecond
+            let targetPoints: CGFloat = 2
+            let binsPerColumn = max(1, Int((Double(targetPoints) * secondsPerPoint * rate).rounded()))
+            let columnSeconds = Double(binsPerColumn) / rate
+            let columnWidth = CGFloat(columnSeconds / secondsPerPoint)
+            let firstColumn = Int(((playhead - window / 2) / columnSeconds).rounded(.down)) - 1
+            let lastColumn = Int(((playhead + window / 2) / columnSeconds).rounded(.up)) + 1
+            var outerPlayed = Path(), outerAhead = Path(), innerPlayed = Path(), innerAhead = Path()
+            let height = mid - 4
+            for column in firstColumn...lastColumn {
+                let b0 = column * binsPerColumn
+                guard b0 >= 0, b0 < peaks.count else { continue }
+                let b1 = min(peaks.count, b0 + binsPerColumn)
+                var peak: Float = 0, loud: Float = 0
+                for b in b0..<b1 {
+                    peak = max(peak, peaks[b])
+                    loud = max(loud, rms[b])
                 }
-                x += step
+                let x = centreX + CGFloat((Double(column) * columnSeconds - playhead) / secondsPerPoint)
+                let w = max(columnWidth - 0.6, 0.8)
+                let hp = max(1, CGFloat(peak) * height)
+                let hr = max(0.5, CGFloat(min(loud, peak)) * height)
+                let outer = CGRect(x: x, y: mid - hp, width: w, height: hp * 2)
+                let inner = CGRect(x: x, y: mid - hr, width: w, height: hr * 2)
+                if x + w <= centreX {
+                    outerPlayed.addRect(outer); innerPlayed.addRect(inner)
+                } else {
+                    outerAhead.addRect(outer); innerAhead.addRect(inner)
+                }
             }
-            context.fill(played, with: .color(deck.color.opacity(0.45)))
-            context.fill(ahead, with: .color(deck.color))
+            context.fill(outerPlayed, with: .color(deck.color.opacity(0.22)))
+            context.fill(innerPlayed, with: .color(deck.color.opacity(0.5)))
+            context.fill(outerAhead, with: .color(deck.color.opacity(0.45)))
+            context.fill(innerAhead, with: .color(deck.color))
         } else {
             var centre = Path()
             centre.addRect(CGRect(x: 0, y: mid, width: size.width, height: 1))

@@ -29,7 +29,7 @@ struct RecordGrid: View {
     private var context: RecordContext { model.records }
     private var selection: Set<URL> { model.organizeSelection }
 
-    private var columns: [FieldRef] { context.allFields.filter { !view.hidden.contains($0) } }
+    private var columns: [FieldRef] { context.orderedFields(view).filter { !view.hidden.contains($0) } }
 
     private func width(_ f: FieldRef) -> CGFloat {
         switch f {

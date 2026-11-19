@@ -210,6 +210,8 @@ nonisolated struct ViewSettings: Codable, Equatable, Sendable {
     var sortAscending = true
     var hidden: Set<FieldRef> = [.intro, .outro, .mood]
     var collapsed: Set<String> = []
+    /// Column order (after the track name), as arranged in Hide fields.
+    var fieldOrder: [FieldRef]?
 
     static let key = "organize.view"
 
@@ -221,6 +223,47 @@ nonisolated struct ViewSettings: Codable, Equatable, Sendable {
 
     func save() {
         if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: Self.key) }
+    }
+}
+
+/// A saved combination of filter, grouping, sort and hidden fields
+/// (Airtable's "views"), to switch to with one click.
+nonisolated struct SavedView: Codable, Identifiable, Equatable, Sendable {
+    var id = UUID()
+    var name: String
+    var settings: ViewSettings
+
+    static let key = "organize.savedViews"
+
+    static func loadAll() -> [SavedView] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let v = try? JSONDecoder().decode([SavedView].self, from: data) else { return [] }
+        return v
+    }
+
+    static func saveAll(_ views: [SavedView]) {
+        if let data = try? JSONEncoder().encode(views) { UserDefaults.standard.set(data, forKey: key) }
+    }
+}
+
+extension ViewSettings {
+    /// Same filter, grouping, sort and hidden fields (which groups are
+    /// folded open doesn't count as a change).
+    func sameSetup(as other: ViewSettings) -> Bool {
+        var a = self, b = other
+        a.collapsed = []
+        b.collapsed = []
+        for i in a.conditions.indices { a.conditions[i].id = b.conditions.indices.contains(i) ? b.conditions[i].id : a.conditions[i].id }
+        return a == b
+    }
+
+    /// One line describing the view, e.g. "Filter: Energy, Tags · Group: Key".
+    func summary(_ context: RecordContext) -> String {
+        var parts: [String] = []
+        if !conditions.isEmpty { parts.append("Filter: " + conditions.map { context.name($0.field) }.joined(separator: ", ")) }
+        if let g = groupBy { parts.append("Group: " + context.name(g)) }
+        if let s = sortField { parts.append("Sort: " + context.name(s)) }
+        return parts.isEmpty ? "All tracks, no filter" : parts.joined(separator: " · ")
     }
 }
 
@@ -288,6 +331,17 @@ struct RecordContext {
     }
 
     var allFields: [FieldRef] { FieldRef.builtins + fields.fields.map { .custom($0.id) } }
+
+    /// All fields in the view's column order: the track name first, then
+    /// the arranged fields, then any new fields not arranged yet.
+    func orderedFields(_ view: ViewSettings) -> [FieldRef] {
+        let all = allFields
+        let existing = Set(all)
+        var result: [FieldRef] = [.name]
+        for f in view.fieldOrder ?? [] where f != .name && existing.contains(f) && !result.contains(f) { result.append(f) }
+        for f in all where !result.contains(f) { result.append(f) }
+        return result
+    }
 
     // Values
 

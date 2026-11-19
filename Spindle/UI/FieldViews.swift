@@ -459,29 +459,58 @@ struct GroupView: View {
     }
 }
 
-/// Airtable's Hide fields.
+/// Airtable's Hide fields: switch fields on or off, drag ≡ to change the
+/// column order. The track name always comes first.
 struct HideFieldsView: View {
     @Binding var view: ViewSettings
     let context: RecordContext
 
+    private var arranged: [FieldRef] { Array(context.orderedFields(view).dropFirst()) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(context.allFields.filter { $0 != .name }, id: \.self) { f in
-                Toggle(isOn: Binding(get: { !view.hidden.contains(f) },
-                                     set: { if $0 { view.hidden.remove(f) } else { view.hidden.insert(f) } })) {
-                    Text(context.name(f)).font(Theme.body)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Switch fields on or off. Drag ≡ to change the order.")
+                .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                .padding([.horizontal, .top], Theme.space3)
+                .padding(.bottom, Theme.space1)
+            List {
+                ForEach(arranged, id: \.self) { f in
+                    HStack(spacing: Theme.space2) {
+                        Toggle("", isOn: Binding(get: { !view.hidden.contains(f) },
+                                                 set: { if $0 { view.hidden.remove(f) } else { view.hidden.insert(f) } }))
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .labelsHidden()
+                        Text(context.name(f))
+                            .font(Theme.body)
+                            .foregroundStyle(view.hidden.contains(f) ? Theme.inkMuted : Theme.ink)
+                        Spacer()
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(Theme.inkFaint)
+                            .help("Drag to move")
+                    }
+                    .padding(.vertical, 1)
                 }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                .onMove { from, to in
+                    var list = arranged
+                    list.move(fromOffsets: from, toOffset: to)
+                    view.fieldOrder = list
+                }
             }
-            HStack {
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(height: min(CGFloat(arranged.count) * 26 + 12, 420))
+            HStack(spacing: Theme.space3) {
                 Button("Show all") { view.hidden = [] }
-                Button("Hide all") { view.hidden = Set(context.allFields.filter { $0 != .name }) }
+                Button("Hide all") { view.hidden = Set(arranged) }
+                Spacer()
+                Button("Reset order") { view.fieldOrder = nil }
+                    .disabled(view.fieldOrder == nil)
             }
-            .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.inkMuted).padding(.top, 4)
+            .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.inkMuted)
+            .padding(Theme.space3)
         }
-        .padding(Theme.space3)
-        .frame(width: 220)
+        .frame(width: 260)
         .background(Theme.panel)
     }
 }

@@ -30,6 +30,8 @@ nonisolated struct LoadedTrack: Sendable {
     let duration: Double
     /// Peak level per waveform column, 0…1.
     let peaks: [Float]
+    /// Loudness (RMS) per column, on the same scale as `peaks`.
+    let rms: [Float]
     static let peaksPerSecond: Double = 200
     /// Pointer to a heap-allocated TrackSamples, handed to the deck.
     nonisolated(unsafe) let samples: UnsafeMutablePointer<TrackSamples>
@@ -86,29 +88,39 @@ nonisolated enum TrackLoader {
         samples.initialize(to: TrackSamples(left: left, right: right, frames: frames, sampleRate: sampleRate))
 
         let (title, artist) = await metadata(url: url)
+        let overview = levels(left: left, right: right, frames: frames, sampleRate: sampleRate)
         return LoadedTrack(url: url, title: title, artist: artist,
                            duration: Double(frames) / sampleRate,
-                           peaks: peaks(left: left, right: right, frames: frames, sampleRate: sampleRate),
+                           peaks: overview.peaks, rms: overview.rms,
                            samples: samples)
     }
 
-    private static func peaks(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int, sampleRate: Double) -> [Float] {
+    /// Peak and loudness per column, both scaled by the loudest peak.
+    private static func levels(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int, sampleRate: Double) -> (peaks: [Float], rms: [Float]) {
         let block = max(1, Int(sampleRate / LoadedTrack.peaksPerSecond))
-        var result = [Float](repeating: 0, count: frames / block + 1)
+        let count = frames / block + 1
+        var peaks = [Float](repeating: 0, count: count)
+        var rms = [Float](repeating: 0, count: count)
         var maxPeak: Float = 0.0001
-        for column in 0..<result.count {
+        for column in 0..<count {
             let start = column * block
             let end = min(start + block, frames)
             var peak: Float = 0
+            var sum: Float = 0
             var i = start
             while i < end {
-                peak = max(peak, abs(left[i]), abs(right[i]))
+                let m = max(abs(left[i]), abs(right[i]))
+                peak = max(peak, m)
+                sum += 0.5 * (left[i] * left[i] + right[i] * right[i])
                 i += 1
             }
-            result[column] = peak
+            peaks[column] = peak
+            rms[column] = end > start ? (sum / Float(end - start)).squareRoot() : 0
             maxPeak = max(maxPeak, peak)
         }
-        return result.map { $0 / maxPeak }
+        // RMS of a full-scale signal sits ~3 dB under its peak; lift it a
+        // little so the solid layer fills most of the outline.
+        return (peaks.map { $0 / maxPeak }, rms.map { min(1, $0 * 1.5 / maxPeak) })
     }
 
     private static func metadata(url: URL) async -> (String, String) {

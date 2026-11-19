@@ -117,6 +117,8 @@ extension ContentView {
         // filtered like Airtable; everything is removed again at the end.
         var testTags: [UUID] = []
         var testFields: [UUID] = []
+        var testViews: [UUID] = []
+        var restoreViewID: UUID?
         let savedColumns = UserDefaults.standard.string(forKey: "mix.columns")
         let savedGroupField = UserDefaults.standard.string(forKey: "mix.groupField")
         let savedView = model.organizeView
@@ -146,6 +148,26 @@ extension ContentView {
             let shown = model.records.apply(model.organizeView, to: model.library.visibleTracks.enumerated().map {
                 Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1) })
             let groups = model.records.group(shown, by: .tags)
+            // Saved views: two templates, switch, edit, revert.
+            let viewsBefore = Set(model.savedViews.map(\.id))
+            let savedCurrent = model.currentViewID
+            model.organizeView = ViewSettings(conditions: [FilterCondition(field: .tags, op: .hasAny, options: [vocal.uuidString])],
+                                              groupBy: .tempoGroup, hidden: [.intro, .outro, .mood, .length])
+            let warmView = model.saveViewAs("Vocal warm-up")
+            model.organizeView = ViewSettings(conditions: [FilterCondition(field: .energy, op: .gte, number: 7)],
+                                              groupBy: .key, hidden: [.intro, .outro, .mood, .length],
+                                              fieldOrder: [.tags, .key, .bpm, .energy, .tempoGroup])
+            let peakView = model.saveViewAs("Peak time")
+            model.applyView(warmView)
+            let warmCount = model.records.apply(model.organizeView, to: model.library.allTracks.enumerated().map {
+                Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1) }).count
+            model.organizeView.conditions.append(FilterCondition(field: .bpm, op: .gt, number: 126))
+            let editedFlag = model.viewModified
+            model.revertCurrentView()
+            spindleLog.notice("View test: '\(model.currentView?.name ?? "-")' shows \(warmCount) tracks; edited after change: \(editedFlag); after revert: \(model.viewModified); views: \(model.savedViews.map(\.name))")
+            model.applyView(peakView)
+            testViews = model.savedViews.map(\.id).filter { !viewsBefore.contains($0) }
+            restoreViewID = savedCurrent
             spindleLog.notice("Field test: \(shown.count) tracks with energy ≥ 5; groups by Tags: " + groups.map { g in
                 "\(g.options.map(\.name).joined(separator: "+").isEmpty ? g.title : g.options.map(\.name).joined(separator: "+")) (\(g.records.count))" }.joined(separator: ", "))
         }
@@ -175,6 +197,8 @@ extension ContentView {
             model.library.selectAll()
             for id in testTags { model.library.tags.delete(id) }
             for id in testFields { model.fields.deleteField(id) }
+            for id in testViews { model.deleteView(id) }
+            model.currentViewID = restoreViewID
             model.organizeView = savedView
             UserDefaults.standard.set(savedColumns, forKey: "mix.columns")
             UserDefaults.standard.set(savedGroupField, forKey: "mix.groupField")

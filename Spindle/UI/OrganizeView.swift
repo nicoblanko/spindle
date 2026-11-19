@@ -58,6 +58,10 @@ struct OrganizeView: View {
     @State private var showFilter = false
     @State private var showGroup = false
     @State private var showHide = false
+    @State private var naming: Naming?
+    @State private var nameDraft = ""
+
+    private enum Naming: Identifiable { case saveAs, rename; var id: Int { self == .saveAs ? 0 : 1 } }
 
     private var viewBinding: Binding<ViewSettings> {
         Binding(get: { model.organizeView }, set: { model.organizeView = $0 })
@@ -112,6 +116,7 @@ struct OrganizeView: View {
     private var toolbar: some View {
         let view = model.organizeView
         return HStack(spacing: Theme.space2) {
+            viewMenu
             LabelText(library.selectionName)
             if analysis.pending > 0 {
                 Text("Analysing… \(analysis.pending) left")
@@ -154,6 +159,83 @@ struct OrganizeView: View {
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, Theme.space2)
         .background(Theme.panelRaised)
+    }
+
+    /// Airtable-style view switcher: saved filter/group/sort templates.
+    private var viewMenu: some View {
+        HStack(spacing: Theme.space1) {
+            Menu {
+                ForEach(model.savedViews) { v in
+                    Button { model.applyView(v.id) } label: {
+                        Label(v.name, systemImage: v.id == model.currentViewID ? "checkmark" : "tablecells")
+                    }
+                }
+                if !model.savedViews.isEmpty { Divider() }
+                Button("Save as new view…") { nameDraft = model.currentView.map { $0.name + " 2" } ?? ""; naming = .saveAs }
+                if let current = model.currentView {
+                    Button("Save changes to “\(current.name)”") { model.updateCurrentView() }
+                        .disabled(!model.viewModified)
+                    Button("Revert changes") { model.revertCurrentView() }
+                        .disabled(!model.viewModified)
+                    Divider()
+                    Button("Rename view…") { nameDraft = current.name; naming = .rename }
+                    Button("Duplicate view") { model.duplicateView(current.id) }
+                    Button("Delete view", role: .destructive) { model.deleteView(current.id) }
+                    Divider()
+                    Button("Leave view (keep settings)") { model.currentViewID = nil }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "tablecells").font(.system(size: 11))
+                    Text(model.currentView?.name ?? "Unsaved view").lineLimit(1)
+                }
+                .font(Theme.body)
+                .foregroundStyle(Theme.ink)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Views: saved combinations of filter, grouping, sort and hidden fields")
+            .popover(item: $naming) { mode in
+                VStack(alignment: .leading, spacing: Theme.space2) {
+                    Text(mode == .saveAs ? "Save this filter and grouping as a view" : "Rename view")
+                        .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                    TextField("View name, e.g. Warm-up set", text: $nameDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 240)
+                        .onSubmit(commitName)
+                    Text(model.organizeView.summary(model.records)).font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    HStack {
+                        Spacer()
+                        Button("Cancel") { naming = nil }.buttonStyle(FlatButtonStyle())
+                        Button(mode == .saveAs ? "Save view" : "Rename", action: commitName)
+                            .buttonStyle(FlatButtonStyle(primary: true))
+                    }
+                }
+                .padding(Theme.space3)
+            }
+            if model.viewModified {
+                Text("Edited").font(Theme.caption).foregroundStyle(TagDef.textColor)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(TagStore.palette[4]).clipShape(Capsule())
+                Button("Save") { model.updateCurrentView() }.buttonStyle(FlatButtonStyle())
+                    .help("Save these settings into “\(model.currentView?.name ?? "")”")
+                Button("Revert") { model.revertCurrentView() }.buttonStyle(FlatButtonStyle())
+            } else if model.currentView == nil && model.organizeView != ViewSettings() {
+                Button("Save as view…") { nameDraft = ""; naming = .saveAs }
+                    .buttonStyle(FlatButtonStyle())
+                    .help("Keep this filter and grouping as a template you can switch back to")
+            }
+            Rectangle().fill(Theme.line).frame(width: 1, height: 18).padding(.horizontal, Theme.space1)
+        }
+    }
+
+    private func commitName() {
+        switch naming {
+        case .saveAs: model.saveViewAs(nameDraft)
+        case .rename: if let id = model.currentViewID { model.renameView(id, to: nameDraft) }
+        case nil: break
+        }
+        naming = nil
     }
 
     private func toolbarButton(_ title: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -685,6 +767,7 @@ struct CrateList: View {
                         plainRow(title: crate, count: library.tracks.filter { $0.crate == crate }.count,
                                  selected: library.crate == crate, icon: "folder") { library.crate = crate }
                     }
+                    viewsSection
                     HStack {
                         LabelText("Playlists")
                         Spacer()
@@ -739,6 +822,65 @@ struct CrateList: View {
             Text(pendingDelete?.isFolder == true
                  ? "The folder and the playlists in it are removed from Spindle. Your audio files stay where they are."
                  : "The playlist is removed from Spindle. Your audio files stay where they are.")
+        }
+    }
+
+    // MARK: Views
+
+    @ViewBuilder
+    private var viewsSection: some View {
+        sectionHeader("Views") {
+            Button("Save current as view") {
+                let id = model.saveViewAs("View \(model.savedViews.count + 1)")
+                draft = model.savedViews.first { $0.id == id }?.name ?? ""
+                renaming = id
+            }
+        }
+        ForEach(model.savedViews) { v in viewRow(v) }
+        if model.savedViews.isEmpty {
+            Text("Set a filter and grouping on the grid, then save it here to switch back with one click.")
+                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                .padding(.horizontal, Theme.space3)
+        }
+    }
+
+    private func viewRow(_ v: SavedView) -> some View {
+        let selected = model.currentViewID == v.id
+        return HStack(spacing: Theme.space1) {
+            Spacer().frame(width: 10)
+            Image(systemName: "tablecells").font(.system(size: 11)).frame(width: 14)
+            if renaming == v.id {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(Theme.body)
+                    .onSubmit { model.renameView(v.id, to: draft); renaming = nil }
+                    .onExitCommand { renaming = nil }
+            } else {
+                Text(v.name).font(Theme.body).lineLimit(1)
+            }
+            Spacer()
+            if selected && model.viewModified {
+                Circle().fill(TagStore.palette[4]).frame(width: 6, height: 6).help("Edited, not saved")
+            }
+        }
+        .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
+        .padding(.leading, Theme.space2)
+        .padding(.trailing, Theme.space3)
+        .padding(.vertical, 5)
+        .background(selected ? Theme.accentSoft : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { draft = v.name; renaming = v.id }
+        .onTapGesture { model.applyView(v.id) }
+        .help(v.settings.summary(model.records))
+        .contextMenu {
+            Button("Rename") { draft = v.name; renaming = v.id }
+            Button("Duplicate") { model.duplicateView(v.id) }
+            if selected && model.viewModified {
+                Button("Save changes") { model.updateCurrentView() }
+                Button("Revert changes") { model.revertCurrentView() }
+            }
+            Divider()
+            Button("Delete view", role: .destructive) { model.deleteView(v.id) }
         }
     }
 

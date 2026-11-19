@@ -133,6 +133,14 @@ final class AppModel {
         didSet { organizeView.save() }
     }
     var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep) }
+    /// Saved views (templates of filter, group, sort and hidden fields).
+    var savedViews: [SavedView] = SavedView.loadAll() {
+        didSet { SavedView.saveAll(savedViews) }
+    }
+    /// The saved view in use, if any.
+    var currentViewID: UUID? = UserDefaults.standard.string(forKey: "organize.currentView").flatMap(UUID.init) {
+        didSet { UserDefaults.standard.set(currentViewID?.uuidString, forKey: "organize.currentView") }
+    }
     let prepPage = PrepPageModel()
     let sessions = SessionStore()
     let midi = MIDIController()
