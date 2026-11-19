@@ -26,14 +26,10 @@ All four pages work:
 - **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
   3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
   (filter, echo) and a mix-ready flag.
-- **Mix:** left, the stack: decks A and B as full cards (waveforms,
-  transport, cue pads, loops, filter, echo), then an endless "Up next"
-  queue to reorder, send to a deck (swap) or remove; Next ▸ loads the next
-  card onto that deck, played tracks are listed below. Right, tracks in
-  tabs (All tracks and each playlist), each an Airtable-style grid with
-  its own view; double-click or drag a track to queue it. Tracks that mix
-  with a playing deck (key and tempo) are marked. The divider between the
-  two sides can be dragged.
+- **Mix:** clip grid above the two decks; columns are playlists, music
+  folders, or one column per value of any field. Clips that mix with a
+  playing deck (key and tempo) are outlined in its colour. Cue pads, beat
+  loops, filter and echo per deck.
 - **Sessions:** records the mix (the mixer's master send or Spindle's own
   output) to 24-bit WAV with an automatic tracklist; export to WAV,
   MP3 (320 kbps, via LAME) or AAC, copy or save the tracklist.
