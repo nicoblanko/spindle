@@ -6,6 +6,13 @@
 //  so the whole chain can be tested without vinyl. The platter has inertia, so
 //  changing the speed behaves like a motor spinning up or a hand dragging it.
 //
+//  MK1: a 2 kHz quadrature carrier whose amplitude carries one bit per cycle.
+//  MK2: a 2.5 kHz quadrature carrier shifted up or down. Each 5-cycle frame has
+//  a 2-cycle part (the sequence 2^21 bits further on) and a 3-cycle part (the
+//  frame's own bit). The phono stage's AC coupling (~1.7 ms) is applied, so
+//  the steps decay as they do on the real records. Levels match recordings of
+//  the user's MK2 records: carrier ~0.12, steps ~0.08.
+//
 
 import Foundation
 
@@ -16,26 +23,11 @@ nonisolated final class TimecodeSimulator {
     private(set) var pitch: Double = 0
     /// Needle position in carrier cycles.
     private(set) var phase: Double
+    /// Position in the bit sequence (cycles for MK1, frames for MK2).
     private var codeIndex = 0
     private var code: UInt32
-
-    init(definition: TimecodeDefinition, startSeconds: Double = 1) {
-        self.definition = definition
-        code = definition.seed
-        phase = startSeconds * definition.resolution
-        seek(toCycle: Int(phase))
-    }
-
-    func seek(seconds: Double) {
-        phase = max(0, seconds * definition.resolution)
-        seek(toCycle: Int(phase))
-    }
-
-    private func seek(toCycle target: Int) {
-        guard definition.decodesPosition else { codeIndex = target; return }
-        while codeIndex < target { code = definition.forward(code); codeIndex += 1 }
-        while codeIndex > target { code = definition.reverse(code); codeIndex -= 1 }
-    }
+    /// MK2 only: the register 2^21 bits ahead, for the 2-cycle parts.
+    private var farCode: UInt32 = 0
 
     /// Needle lifted off the record: only a little noise reaches the input,
     /// while the platter keeps turning.
@@ -45,6 +37,46 @@ nonisolated final class TimecodeSimulator {
     /// Set from the UI to drop the needle; applied on the audio thread.
     var seekRequest: Double = -1
 
+    // AC coupling of the phono stage (MK2).
+    private var hpL: Float = 0, hpR: Float = 0, lastL: Float = 0, lastR: Float = 0
+
+    init(definition: TimecodeDefinition, startSeconds: Double = 1) {
+        self.definition = definition
+        code = definition.seed
+        if definition.offsetModulated {
+            var far = definition.seed
+            for _ in 0..<(1 << 21) { far = definition.forward(far) }
+            farCode = far
+        }
+        phase = startSeconds * definition.resolution
+        seek(toIndex: index(ofCycle: phase))
+    }
+
+    func seek(seconds: Double) {
+        phase = max(0, seconds * definition.resolution)
+        seek(toIndex: index(ofCycle: phase))
+    }
+
+    @inline(__always)
+    private func index(ofCycle cycle: Double) -> Int {
+        Int((cycle / Double(definition.cyclesPerBit)).rounded(.down))
+    }
+
+    private func seek(toIndex target: Int) {
+        guard definition.decodesPosition else { codeIndex = target; return }
+        let mk2 = definition.offsetModulated
+        while codeIndex < target {
+            code = definition.forward(code)
+            if mk2 { farCode = definition.forward(farCode) }
+            codeIndex += 1
+        }
+        while codeIndex > target {
+            code = definition.reverse(code)
+            if mk2 { farCode = definition.reverse(farCode) }
+            codeIndex -= 1
+        }
+    }
+
     func generate(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>,
                   frames: Int, sampleRate: Double) {
         if seekRequest >= 0 {
@@ -52,22 +84,42 @@ nonisolated final class TimecodeSimulator {
             seekRequest = -1
         }
         let step = definition.resolution / sampleRate
-        let maxCycle = definition.decodesPosition ? Double(definition.length - 1) : 1e9
+        let maxCycle = definition.decodesPosition
+            ? Double(definition.length * definition.cyclesPerBit - 1) : 1e9
+        let mk2 = definition.offsetModulated
+        let coupling = Float(exp(-1 / (0.0017 * sampleRate)))
+
         for i in 0..<frames {
             pitch += (targetPitch - pitch) * 0.0008
             phase = min(max(phase + pitch * step, 0), maxCycle)
-            let cycle = Int(phase)
-            if cycle != codeIndex { seek(toCycle: cycle) }
+            let index = index(ofCycle: phase)
+            if index != codeIndex { seek(toIndex: index) }
+
+            var l: Float, r: Float
             if lifted {
                 noise = noise &* 1664525 &+ 1013904223
-                left[i] = (Float(noise >> 8) / Float(1 << 24) - 0.5) * 0.001
-                right[i] = left[i]
-                continue
+                l = (Float(noise >> 8) / Float(1 << 24) - 0.5) * 0.001
+                r = l
+            } else if mk2 {
+                let theta = 2 * Double.pi * phase
+                let inFrame = Int(phase.rounded(.down)) - index * 5
+                let high = inFrame < 2 ? definition.bit(of: farCode) : definition.bit(of: code)
+                let offset: Float = high ? 0.04 : -0.04
+                l = Float(sin(theta)) * 0.12 + offset
+                r = Float(cos(theta)) * 0.12 + offset
+            } else {
+                let amplitude: Float = !definition.decodesPosition || definition.bit(of: code) ? 0.3 : 0.2
+                let theta = 2 * Double.pi * phase
+                l = Float(sin(theta)) * amplitude
+                r = Float(cos(theta)) * amplitude
             }
-            let amplitude: Float = !definition.decodesPosition || definition.bit(of: code) ? 0.3 : 0.2
-            let theta = 2 * Double.pi * phase
-            left[i] = Float(sin(theta)) * amplitude
-            right[i] = Float(cos(theta)) * amplitude
+
+            if mk2 {
+                hpL = coupling * (hpL + l - lastL); lastL = l; l = hpL
+                hpR = coupling * (hpR + r - lastR); lastR = r; r = hpR
+            }
+            left[i] = l
+            right[i] = r
         }
     }
 }

@@ -208,7 +208,7 @@ struct DeckPanel: View {
     private var simulator: some View {
         VStack(alignment: .leading, spacing: Theme.space2) {
             HStack {
-                LabelText("Simulated turntable · MK1 timecode")
+                LabelText("Simulated turntable · \(model.engine?.definition.name ?? "")")
                 Spacer()
                 Text(Self.pitch(deck.simulatedPitch))
                     .font(Theme.readoutSm)

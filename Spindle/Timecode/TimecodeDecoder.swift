@@ -132,7 +132,12 @@ nonisolated final class TimecodeDecoder {
             if bits > period / 2 { bits -= period }
             if bits < -period / 2 { bits += period }
         }
-        return Double(bits) / definition.bitRate + pitch * samplesSinceBit / sampleRate
+        // Between bits, move on at the current speed, but by no more than about
+        // a bit: after the record has stood still, the time since the last bit
+        // is long and would otherwise throw the position off on the restart.
+        let bitSeconds = 1 / definition.bitRate
+        let since = min(max(pitch * samplesSinceBit / sampleRate, -1.5 * bitSeconds), 1.5 * bitSeconds)
+        return Double(bits) * bitSeconds + since
     }
 
     @inline(__always)
