@@ -106,45 +106,9 @@ struct WaveformLane: View {
         context.fill(ticks, with: .color(Theme.line))
 
         if let track = deck.track, !track.peaks.isEmpty {
-            // Columns are fixed to the track's timeline (not to the screen),
-            // so each one keeps its shape and glides past the playhead.
-            let peaks = track.peaks, rms = track.rms
-            let rate = LoadedTrack.peaksPerSecond
-            let targetPoints: CGFloat = 2
-            let binsPerColumn = max(1, Int((Double(targetPoints) * secondsPerPoint * rate).rounded()))
-            let columnSeconds = Double(binsPerColumn) / rate
-            let firstColumn = Int(((playhead - window / 2) / columnSeconds).rounded(.down)) - 1
-            let lastColumn = Int(((playhead + window / 2) / columnSeconds).rounded(.up)) + 1
-            var outerPlayed = Path(), outerAhead = Path(), innerPlayed = Path(), innerAhead = Path()
-            let height = mid - 4
-            for column in firstColumn...lastColumn {
-                let b0 = column * binsPerColumn
-                guard b0 >= 0, b0 < peaks.count else { continue }
-                let b1 = min(peaks.count, b0 + binsPerColumn)
-                var peak: Float = 0, loud: Float = 0
-                for b in b0..<b1 {
-                    peak = max(peak, peaks[b])
-                    loud = max(loud, rms[b])
-                }
-                let scale = max(context.environment.displayScale, 1)
-                let px = ((centreX + CGFloat((Double(column) * columnSeconds - playhead) / secondsPerPoint)) * scale).rounded()
-                let pxEnd = ((centreX + CGFloat((Double(column + 1) * columnSeconds - playhead) / secondsPerPoint)) * scale).rounded()
-                let x = px / scale
-                let w = max(pxEnd - px - (pxEnd - px >= 3 ? 1 : 0), 1) / scale
-                let hp = max(1, CGFloat(peak) * height)
-                let hr = max(0.5, CGFloat(min(loud, peak)) * height)
-                let outer = CGRect(x: x, y: mid - hp, width: w, height: hp * 2)
-                let inner = CGRect(x: x, y: mid - hr, width: w, height: hr * 2)
-                if x + w <= centreX {
-                    outerPlayed.addRect(outer); innerPlayed.addRect(inner)
-                } else {
-                    outerAhead.addRect(outer); innerAhead.addRect(inner)
-                }
-            }
-            context.fill(outerPlayed, with: .color(deck.color.opacity(0.22)))
-            context.fill(innerPlayed, with: .color(deck.color.opacity(0.5)))
-            context.fill(outerAhead, with: .color(deck.color.opacity(0.45)))
-            context.fill(innerAhead, with: .color(deck.color))
+            WaveformRenderer.draw(context, track: track, start: playhead - window / 2, span: window,
+                                  rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
+                                  playhead: playhead, style: LookSettings.shared.waveStyle, monoColor: deck.color)
         } else {
             var centre = Path()
             centre.addRect(CGRect(x: 0, y: mid, width: size.width, height: 1))
@@ -177,30 +141,15 @@ struct TrackOverview: View {
             let playhead = telemetry?.pointee.playhead ?? 0
             Canvas { context, size in
                 guard let track = deck.track, !track.peaks.isEmpty, track.duration > 0 else { return }
-                let peaks = track.peaks
-                let mid = size.height / 2
-                let columns = max(1, Int(size.width / 2))
-                let perColumn = Double(peaks.count) / Double(columns)
                 let playedX = CGFloat(playhead / track.duration) * size.width
-                var played = Path()
-                var ahead = Path()
-                for column in 0..<columns {
-                    let start = Int(Double(column) * perColumn)
-                    let end = min(peaks.count, max(start + 1, Int(Double(column + 1) * perColumn)))
-                    var peak: Float = 0
-                    for i in start..<end { peak = max(peak, peaks[i]) }
-                    let x = CGFloat(column) * 2
-                    let h = max(1, CGFloat(peak) * (mid - 2))
-                    let rect = CGRect(x: x, y: mid - h, width: 1.5, height: h * 2)
-                    if x < playedX { played.addRect(rect) } else { ahead.addRect(rect) }
-                }
+                WaveformRenderer.draw(context, track: track, start: 0, span: track.duration,
+                                      rect: CGRect(x: 0, y: 2, width: size.width, height: size.height - 4),
+                                      playhead: playhead, style: LookSettings.shared.waveStyle, monoColor: deck.color)
                 if deck.loopActive, deck.loopLength > 0 {
                     let a = CGFloat(deck.loopStart / track.duration) * size.width
                     let w = max(2, CGFloat(deck.loopLength / track.duration) * size.width)
                     context.fill(Path(CGRect(x: a, y: 0, width: w, height: size.height)), with: .color(Theme.match.opacity(0.35)))
                 }
-                context.fill(played, with: .color(deck.color.opacity(0.4)))
-                context.fill(ahead, with: .color(deck.color.opacity(0.85)))
                 var head = Path()
                 head.addRect(CGRect(x: min(max(playedX, 0), size.width) - 1, y: 0, width: 2, height: size.height))
                 context.fill(head, with: .color(Theme.accent))

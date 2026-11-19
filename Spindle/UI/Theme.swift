@@ -3,31 +3,72 @@
 //  Spindle
 //
 //  Tokens from the Spindle style guide. Dark, flat, square; one orange accent
-//  used only for the active page, selection and playhead.
+//  used only for the active page, selection and playhead. "Darker" swaps the
+//  surfaces for near-black ones; everything else stays.
 //
 
 import AppKit
+import Observation
 import SwiftUI
 
+/// Look settings you can change while the app runs: the darker variant of
+/// the theme and the waveform style. Views read them through `Theme`, so
+/// they redraw when one changes.
+@Observable
+final class LookSettings {
+    static let shared = LookSettings()
+
+    /// Black & white: pure black surfaces, every colour turned to the grey
+    /// of the same brightness.
+    var darker = UserDefaults.standard.bool(forKey: "look.darker") {
+        didSet {
+            UserDefaults.standard.set(darker, forKey: "look.darker")
+            LookFlags.mono = darker
+        }
+    }
+
+    init() { LookFlags.mono = darker }
+    var waveStyle = WaveStyle(rawValue: UserDefaults.standard.string(forKey: "look.wave") ?? "") ?? .threeBand {
+        didSet { UserDefaults.standard.set(waveStyle.rawValue, forKey: "look.wave") }
+    }
+}
+
+/// Read by `Color(hex:)` from any thread, so it can't live on the main actor.
+nonisolated enum LookFlags {
+    nonisolated(unsafe) static var mono = false
+}
+
+/// How waveforms are coloured.
+enum WaveStyle: String, CaseIterable, Identifiable {
+    /// Bass, mids and highs as three layers (blue, amber, white).
+    case threeBand = "3-Band"
+    /// One shape, coloured by its sound: red bass, green mids, blue highs.
+    case rgb = "RGB"
+    /// One colour, loudness inside the peaks.
+    case mono = "Mono"
+    var id: String { rawValue }
+}
+
 enum Theme {
-    static let bg = Color(hex: 0x161618)
-    static let panel = Color(hex: 0x1f1f22)
-    static let panelRaised = Color(hex: 0x2a2a2e)
-    static let control = Color(hex: 0x35353a)
-    static let line = Color(hex: 0x3e3e44)
-    static let ink = Color(hex: 0xe2e2e4)
-    static let inkMuted = Color(hex: 0x9a9aa1)
-    static let inkFaint = Color(hex: 0x6c6c73)
-    static let accent = Color(hex: 0xf08a24)
-    static let accentSoft = Color(hex: 0x4a2f16)
-    static let onAccent = Color(hex: 0x161618)
-    static let deckA = Color(hex: 0x4fa3ff)
-    static let deckB = Color(hex: 0xc06a2b)
-    static let match = Color(hex: 0x5fd37a)
-    static let warn = Color(hex: 0xff5a4f)
-    static let waveLow = Color(hex: 0x3d6fb3)
-    static let waveMid = Color(hex: 0xa8b4c4)
-    static let waveHigh = Color(hex: 0xeef2f7)
+    private static var d: Bool { LookSettings.shared.darker }
+    static var bg: Color { d ? Color(hex: 0x000000) : Color(hex: 0x161618) }
+    static var panel: Color { d ? Color(hex: 0x0a0a0a) : Color(hex: 0x1f1f22) }
+    static var panelRaised: Color { d ? Color(hex: 0x141414) : Color(hex: 0x2a2a2e) }
+    static var control: Color { d ? Color(hex: 0x1f1f1f) : Color(hex: 0x35353a) }
+    static var line: Color { d ? Color(hex: 0x282828) : Color(hex: 0x3e3e44) }
+    static var ink: Color { d ? Color(hex: 0xf2f2f2) : Color(hex: 0xe2e2e4) }
+    static var inkMuted: Color { Color(hex: 0x9a9aa1) }
+    static var inkFaint: Color { Color(hex: 0x6c6c73) }
+    static var accent: Color { d ? Color(hex: 0xffffff) : Color(hex: 0xf08a24) }
+    static var accentSoft: Color { d ? Color(hex: 0x2e2e2e) : Color(hex: 0x4a2f16) }
+    static var onAccent: Color { d ? Color(hex: 0x000000) : Color(hex: 0x161618) }
+    static var deckA: Color { d ? Color(hex: 0xe8e8e8) : Color(hex: 0x4fa3ff) }
+    static var deckB: Color { d ? Color(hex: 0x8a8a8a) : Color(hex: 0xc06a2b) }
+    static var match: Color { d ? Color(hex: 0xc8c8c8) : Color(hex: 0x5fd37a) }
+    static var warn: Color { d ? Color(hex: 0xffffff) : Color(hex: 0xff5a4f) }
+    static var waveLow: Color { Color(hex: 0x3d6fb3) }
+    static var waveMid: Color { Color(hex: 0xa8b4c4) }
+    static var waveHigh: Color { Color(hex: 0xeef2f7) }
 
     static let space1: CGFloat = 4
     static let space2: CGFloat = 8
@@ -59,11 +100,15 @@ enum Theme {
 }
 
 extension Color {
-    init(hex: UInt32) {
-        self.init(.sRGB,
-                  red: Double((hex >> 16) & 0xff) / 255,
-                  green: Double((hex >> 8) & 0xff) / 255,
-                  blue: Double(hex & 0xff) / 255)
+    /// In Black & white, every colour becomes the grey of its brightness.
+    nonisolated init(hex: UInt32) {
+        let r = Double((hex >> 16) & 0xff) / 255, g = Double((hex >> 8) & 0xff) / 255, b = Double(hex & 0xff) / 255
+        if LookFlags.mono {
+            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            self.init(.sRGB, red: y, green: y, blue: y)
+        } else {
+            self.init(.sRGB, red: r, green: g, blue: b)
+        }
     }
 }
 

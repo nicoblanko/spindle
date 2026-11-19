@@ -100,6 +100,14 @@ extension ContentView {
         }
         guard let dir = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT"] else { return }
         let original = model.page
+        // SPINDLE_LOOK=rgb|3-band|mono[,darker]: snapshot in that look, then restore yours.
+        let look = LookSettings.shared
+        let savedLook = (look.darker, look.waveStyle)
+        if let spec = ProcessInfo.processInfo.environment["SPINDLE_LOOK"]?.lowercased() {
+            look.darker = spec.contains("darker")
+            look.waveStyle = spec.contains("rgb") ? .rgb : spec.contains("mono") ? .mono : .threeBand
+        }
+        defer { look.darker = savedLook.0; look.waveStyle = savedLook.1 }
         try? await Task.sleep(for: .seconds(4))
         let tracks = model.library.tracks
         // Speed check: building the Organize list with the current view.
@@ -348,6 +356,7 @@ private struct TopBar: View {
                 Text(SessionStore.clock(model.sessions.elapsed)).font(Theme.readoutSm).foregroundStyle(Theme.ink)
             }
             Spacer()
+            LookMenu(look: LookSettings.shared)
             Button("MIDI") { model.showingMIDI = true }
                 .buttonStyle(FlatButtonStyle())
                 .help("Map an Akai MPK mini or other MIDI controller (MIDI learn)")
@@ -412,6 +421,27 @@ private struct TopBar: View {
         } else {
             LabelText("Stopped", color: Theme.inkFaint)
         }
+    }
+}
+
+/// Darker theme and waveform style.
+private struct LookMenu: View {
+    @Bindable var look: LookSettings
+
+    var body: some View {
+        Menu {
+            Toggle("Black & white", isOn: $look.darker)
+            Picker("Waveform", selection: $look.waveStyle) {
+                ForEach(WaveStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "circle.lefthalf.filled")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Black & white look and waveform colours")
     }
 }
 

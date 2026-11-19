@@ -64,11 +64,11 @@ final class TagStore {
 
     /// Airtable's light option colours: blue, cyan, teal, green, yellow,
     /// orange, red, pink, purple, grey.
-    static let palette: [Color] = [
+    static var palette: [Color] { [
         Color(hex: 0xcfdfff), Color(hex: 0xd0f0fd), Color(hex: 0xc2f5e9), Color(hex: 0xd1f7c4),
         Color(hex: 0xffeab6), Color(hex: 0xfee2d5), Color(hex: 0xffdce5), Color(hex: 0xffdaf6),
         Color(hex: 0xede2fe), Color(hex: 0xe5e9f0),
-    ]
+    ] }
     static let paletteNames = ["Blue", "Cyan", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Grey"]
 
     private struct Saved: Codable { var tags: [TagDef]; var assigned: [String: Set<UUID>] }

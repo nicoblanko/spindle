@@ -32,6 +32,12 @@ nonisolated struct LoadedTrack: Sendable {
     let peaks: [Float]
     /// Loudness (RMS) per column, on the same scale as `peaks`.
     let rms: [Float]
+    /// Peak per column of the bass (< 200 Hz), mids and highs (> 2.5 kHz),
+    /// each 0…1 against its own loudest moments: what the coloured
+    /// waveforms are drawn from.
+    let low: [Float]
+    let mid: [Float]
+    let high: [Float]
     static let peaksPerSecond: Double = 200
     /// Pointer to a heap-allocated TrackSamples, handed to the deck.
     nonisolated(unsafe) let samples: UnsafeMutablePointer<TrackSamples>
@@ -92,9 +98,11 @@ nonisolated enum TrackLoader {
 
         let (title, artist) = await metadata(url: url)
         let overview = levels(left: left, right: right, frames: frames, sampleRate: sampleRate)
+        let bands = Self.bands(left: left, right: right, frames: frames, sampleRate: sampleRate)
         return LoadedTrack(url: url, title: title, artist: artist,
                            duration: Double(frames) / sampleRate,
                            peaks: overview.peaks, rms: overview.rms,
+                           low: bands.low, mid: bands.mid, high: bands.high,
                            samples: samples)
     }
 
@@ -124,6 +132,60 @@ nonisolated enum TrackLoader {
         // RMS of a full-scale signal sits ~3 dB under its peak; lift it a
         // little so the solid layer fills most of the outline.
         return (peaks.map { $0 / maxPeak }, rms.map { min(1, $0 * 1.5 / maxPeak) })
+    }
+
+    /// A second-order (biquad) filter, RBJ cookbook coefficients.
+    private struct Biquad {
+        var b0: Float, b1: Float, b2: Float, a1: Float, a2: Float
+        var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
+
+        init(lowPass f: Double, rate: Double) { self.init(f, rate, high: false) }
+        init(highPass f: Double, rate: Double) { self.init(f, rate, high: true) }
+        private init(_ f: Double, _ rate: Double, high: Bool) {
+            let w = 2 * Double.pi * f / rate, q = 0.7071
+            let alpha = sin(w) / (2 * q), c = cos(w)
+            let a0 = 1 + alpha
+            let bb0 = high ? (1 + c) / 2 : (1 - c) / 2
+            let bb1 = high ? -(1 + c) : 1 - c
+            b0 = Float(bb0 / a0); b1 = Float(bb1 / a0); b2 = Float(bb0 / a0)
+            a1 = Float(-2 * c / a0); a2 = Float((1 - alpha) / a0)
+        }
+        @inline(__always) mutating func run(_ x: Float) -> Float {
+            let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2 = x1; x1 = x; y2 = y1; y1 = y
+            return y
+        }
+    }
+
+    /// Bass, mids and highs per waveform column.
+    private static func bands(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int, sampleRate: Double) -> (low: [Float], mid: [Float], high: [Float]) {
+        let block = max(1, Int(sampleRate / LoadedTrack.peaksPerSecond))
+        let count = frames / block + 1
+        var low = [Float](repeating: 0, count: count), mid = low, high = low
+        var lp = Biquad(lowPass: 200, rate: sampleRate)
+        var mHP = Biquad(highPass: 200, rate: sampleRate), mLP = Biquad(lowPass: 2500, rate: sampleRate)
+        var hp = Biquad(highPass: 2500, rate: sampleRate)
+        var i = 0
+        for column in 0..<count {
+            let end = min(i + block, frames)
+            var l: Float = 0, m: Float = 0, h: Float = 0
+            while i < end {
+                let x = 0.5 * (left[i] + right[i])
+                l = max(l, abs(lp.run(x)))
+                m = max(m, abs(mLP.run(mHP.run(x))))
+                h = max(h, abs(hp.run(x)))
+                i += 1
+            }
+            low[column] = l; mid[column] = m; high[column] = h
+        }
+        // Each band against its own loud moments (99.5th percentile), so
+        // quiet highs still show.
+        func norm(_ v: [Float]) -> [Float] {
+            let sorted = v.sorted()
+            let top = max(sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.995))], 1e-6)
+            return v.map { min(1, $0 / top) }
+        }
+        return (norm(low), norm(mid), norm(high))
     }
 
     private static func metadata(url: URL) async -> (String, String) {

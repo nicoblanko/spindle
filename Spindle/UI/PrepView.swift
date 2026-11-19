@@ -469,51 +469,6 @@ struct SmallButtonStyle: ButtonStyle {
 
 // MARK: - Waveforms
 
-/// Draws one waveform column range as two layers: peaks (outline) and
-/// loudness (solid core). Columns are fixed to the track's timeline, so they
-/// keep their shape as the view moves.
-private func drawWave(_ context: GraphicsContext, track: LoadedTrack, start: Double, span: Double,
-                      size: CGSize, top: CGFloat, height: CGFloat, playhead: Double, columnPoints: CGFloat) {
-    let peaks = track.peaks, rms = track.rms
-    guard !peaks.isEmpty, span > 0 else { return }
-    let rate = LoadedTrack.peaksPerSecond
-    let secondsPerPoint = span / Double(size.width)
-    let bins = max(1, Int((Double(columnPoints) * secondsPerPoint * rate).rounded()))
-    let columnSeconds = Double(bins) / rate
-    let first = max(0, Int((start / columnSeconds).rounded(.down)))
-    let last = Int(((start + span) / columnSeconds).rounded(.up))
-    let scale = max(context.environment.displayScale, 1)
-    let mid = top + height / 2
-    let half = height / 2 - 1
-    var outerPlayed = Path(), innerPlayed = Path(), outerAhead = Path(), innerAhead = Path()
-    for column in first...max(first, last) {
-        let b0 = column * bins
-        guard b0 < peaks.count else { break }
-        let b1 = min(peaks.count, b0 + bins)
-        var peak: Float = 0, loud: Float = 0
-        for b in b0..<b1 { peak = max(peak, peaks[b]); loud += rms[b] }
-        loud /= Float(b1 - b0)          // average loudness: the body, not the spikes
-        let t = Double(column) * columnSeconds
-        // Whole device pixels, so every bar renders alike (fractional edges
-        // make a diagonal moiré across the waveform).
-        let px = (CGFloat((t - start) / secondsPerPoint) * scale).rounded()
-        let pxEnd = (CGFloat((t + columnSeconds - start) / secondsPerPoint) * scale).rounded()
-        let gap: CGFloat = pxEnd - px >= 3 ? 1 : 0
-        let x = px / scale
-        let w = max(pxEnd - px - gap, 1) / scale
-        let hp = max(0.5, CGFloat(peak) * half)
-        let hr = max(0.5, CGFloat(min(loud, peak)) * half)
-        let outer = CGRect(x: x, y: mid - hp, width: w, height: hp * 2)
-        let inner = CGRect(x: x, y: mid - hr, width: w, height: hr * 2)
-        if t + columnSeconds <= playhead { outerPlayed.addRect(outer); innerPlayed.addRect(inner) }
-        else { outerAhead.addRect(outer); innerAhead.addRect(inner) }
-    }
-    context.fill(outerPlayed, with: .color(Theme.waveLow.opacity(0.45)))
-    context.fill(innerPlayed, with: .color(Theme.waveMid.opacity(0.45)))
-    context.fill(outerAhead, with: .color(Theme.waveLow))
-    context.fill(innerAhead, with: .color(Theme.waveMid))
-}
-
 /// The whole track: click or drag anywhere to go there.
 private struct PrepOverview: View {
     let model: AppModel
@@ -522,6 +477,8 @@ private struct PrepOverview: View {
 
     var body: some View {
         let duration = max(model.prepDuration, 1)
+        let style = LookSettings.shared.waveStyle
+        let _ = LookSettings.shared.darker
         ZStack {
             // The waveform only changes with the track: draw it once.
             Canvas { context, size in
@@ -531,8 +488,9 @@ private struct PrepOverview: View {
                     context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(Theme.match.opacity(0.12)))
                 }
                 if let track = page.preview {
-                    drawWave(context, track: track, start: 0, span: duration, size: size,
-                             top: 4, height: size.height - 8, playhead: 0, columnPoints: 2)
+                    WaveformRenderer.draw(context, track: track, start: 0, span: duration,
+                                          rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
+                                          playhead: 0, style: style, dimPlayed: false)
                 }
                 for cue in prep.cues {
                     let x = CGFloat(cue.time / duration) * size.width
@@ -573,9 +531,11 @@ private struct PrepLane: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
+                let style = LookSettings.shared.waveStyle
+                let _ = LookSettings.shared.darker
                 TimelineView(.animation(paused: !page.playing)) { _ in
                     let t = model.prepPosition
-                    Canvas { context, size in draw(context, size, playhead: t) }
+                    Canvas { context, size in draw(context, size, playhead: t, style: style) }
                 }
                 WaveformInteraction(
                     onScroll: { model.prepScrub(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
@@ -601,7 +561,7 @@ private struct PrepLane: View {
         }
     }
 
-    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double) {
+    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double, style: WaveStyle) {
         let span = page.zoom
         let start = playhead - span / 2
         let secondsPerPoint = span / Double(size.width)
@@ -655,8 +615,9 @@ private struct PrepLane: View {
 
         // Waveform.
         if let track = page.preview {
-            drawWave(context, track: track, start: start, span: span, size: size,
-                     top: laneTop + 4, height: laneHeight - 8, playhead: playhead, columnPoints: 2)
+            WaveformRenderer.draw(context, track: track, start: start, span: span,
+                                  rect: CGRect(x: 0, y: laneTop + 4, width: size.width, height: laneHeight - 8),
+                                  playhead: playhead, style: style)
         } else if let w = page.waveform {
             // The quick analysis waveform until the audio is decoded.
             var path = Path()
