@@ -30,13 +30,6 @@ All four pages work:
   folders, or one column per value of any field. Clips that mix with a
   playing deck (key and tempo) are outlined in its colour. Cue pads, beat
   loops, filter and echo per deck.
-- **Launch:** a clip launcher for DJing, next to Mix. Six channels × eight
-  scenes; drag a track onto a cell to make a clip (from a cue, 1–32 bars
-  looped, or to the end once). Clips start and stop on a master clock
-  (next beat, bar or 4 bars), sample-accurate and in phase; the master
-  tempo is manual or follows a deck. Volume, filter, mute and stop per
-  channel; plays on AUX 5–6 when the device has six outputs. Speed and
-  pitch change together for now (no time-stretching yet).
 - **Sessions:** records the mix (the mixer's master send or Spindle's own
   output) to 24-bit WAV with an automatic tracklist; export to WAV,
   MP3 (320 kbps, via LAME) or AAC, copy or save the tracklist.

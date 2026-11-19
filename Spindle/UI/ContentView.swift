@@ -36,9 +36,6 @@ struct ContentView: View {
             case .mix:
                 MixView(model: model, library: model.library)
                     .frame(maxHeight: .infinity)
-            case .launch:
-                LaunchView(model: model, launch: model.launch)
-                    .frame(maxHeight: .infinity)
             case .sessions:
                 SessionsView(model: model, store: model.sessions)
                     .frame(maxHeight: .infinity)
@@ -193,29 +190,6 @@ extension ContentView {
             spindleLog.notice("Stack test: deck B \(model.decks[1].track?.title ?? "-"), queue \(model.stack.count), played \(model.played.count)")
             if let first = model.library.playlists.playlists.first { model.mixTab = first.node.id.uuidString }
         }
-        // Launch test: five clips, scene 1 started; the grid is restored at the end.
-        let savedLaunch = model.launch.set
-        if ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_LAUNCH"] != nil, tracks.count > 6 {
-            for (i, t) in tracks.prefix(5).enumerated() {
-                model.assignClip(t.url, row: i < 3 ? 0 : 1, column: i < 3 ? i : i - 1)
-            }
-            model.editClip(row: 0, column: 1) { $0.bars = 4 }
-            model.launch.tempoSource = .manual
-            model.launch.manualBPM = 128
-            model.updateMasterTempo()
-            model.launchScene(0)
-            try? await Task.sleep(for: .seconds(5))
-            if let engine = model.engine {
-                let beat = engine.masterBeat
-                for c in 0..<3 {
-                    let t = engine.clipPlayers[c].telemetry.pointee
-                    guard let clip = model.launch.set.clip(0, c) else { continue }
-                    let loopBeats = Double(clip.bars * 4)
-                    spindleLog.notice(String(format: "Launch test: ch%d playing %@ id %d, progress %.3f, bars %d, master beat %.2f (beat in loop %.3f)",
-                        c + 1, "\(t.playing)", t.clipID, t.progress, clip.bars, beat, (beat.truncatingRemainder(dividingBy: loopBeats)) / loopBeats))
-                }
-            }
-        }
         let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
         if recordTest { model.toggleRecording() }
         let started = Date()
@@ -238,8 +212,6 @@ extension ContentView {
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }
-        model.stopAllClips()
-        if model.launch.set != savedLaunch { model.launch.update { $0 = savedLaunch } }
         model.stack = savedStack
         model.played = []
         model.mixTab = savedTab

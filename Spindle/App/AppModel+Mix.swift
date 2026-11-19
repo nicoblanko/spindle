@@ -393,7 +393,6 @@ extension AppModel {
                     if abs(deck.pitch - rounded) > 0.002 { deck.pitch = rounded }
                 }
                 self.sessions.tick(model: self)
-                self.updateMasterTempo()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }

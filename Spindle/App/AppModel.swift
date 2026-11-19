@@ -133,8 +133,6 @@ final class AppModel {
         didSet { organizeView.save() }
     }
     var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep) }
-    /// The Launch page.
-    let launch = LaunchModel()
     /// The Mix page's queue ("Up next"), remembered between launches.
     var stack: [StackItem] = StackItem.load() {
         didSet { StackItem.save(stack) }
@@ -179,7 +177,7 @@ final class AppModel {
     }
 
     enum Page: String, CaseIterable, Identifiable {
-        case organize = "Organize", prep = "Prep", mix = "Mix", launch = "Launch", sessions = "Sessions"
+        case organize = "Organize", prep = "Prep", mix = "Mix", sessions = "Sessions"
         var id: String { rawValue }
         var available: Bool { true }
     }
@@ -272,7 +270,6 @@ final class AppModel {
         engine = core
         running = true
         updateGains()
-        applyLaunchSettings()
         rememberLocks()
         monitorDecks()
         core.recordInput = recordInputDefault(for: core)

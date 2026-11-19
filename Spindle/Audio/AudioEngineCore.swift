@@ -63,16 +63,6 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
     /// Read by the audio thread each buffer; set from the UI.
     var routing: EngineRouting
 
-    /// Launch page: clip channels and the master clock they follow.
-    static let clipChannels = 6
-    let clipPlayers: [ClipPlayer]
-    /// Master tempo (set from the UI) and the master beat (audio thread).
-    var masterBPM: Double = 128
-    private(set) var masterBeat: Double = 0
-    /// First output channel the clip channels play on (AUX 5–6 on a
-    /// six-output device, else 1–2).
-    var clipOutput = 0
-
     /// What the session recorder hears.
     let recordTap = RecordTap()
     /// First input channel of the pair to record (the mixer's record/master
@@ -100,9 +90,6 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
                  DeckEngine(definition: definition, sampleRate: sampleRate)]
         simulators = [TimecodeSimulator(definition: definition), TimecodeSimulator(definition: definition)]
         for deck in decks { deck.internalMode = laptop }
-        let rate = sampleRate
-        clipPlayers = (0..<Self.clipChannels).map { _ in ClipPlayer(sampleRate: rate) }
-        clipOutput = device.outputChannels >= 6 ? 4 : 0
 
         inputList = AudioBufferList.allocate(maximumBuffers: max(inputChannels, 1))
         var data: [UnsafeMutablePointer<Float>] = []
@@ -246,20 +233,6 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
             deck.render(left: left, right: right, frames: frames, mix: true)
         }
 
-        // Launch page: clip channels on the master clock.
-        let bpm = masterBPM
-        let beatsPerFrame = bpm / 60 / sampleRate
-        let co = clipOutput + 1 < buffers.count ? clipOutput : 0
-        if co + 1 < buffers.count,
-           let cl = buffers[co].mData?.assumingMemoryBound(to: Float.self),
-           let cr = buffers[co + 1].mData?.assumingMemoryBound(to: Float.self) {
-            for player in clipPlayers {
-                player.render(left: cl, right: cr, frames: frames, beatStart: masterBeat,
-                              beatsPerFrame: beatsPerFrame, masterBPM: bpm)
-            }
-        }
-        masterBeat += Double(frames) * beatsPerFrame
-
         // Recording: the mixer's record send if chosen, else both decks' output.
         let source = recordInput
         if source >= 0 && source + 1 < inputChannels {
@@ -269,9 +242,7 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
             mixR.update(repeating: 0, count: frames)
             var pairs = [0]
             if separate { pairs = [routing.output(0), routing.output(1)] }
-            pairs.append(co)
-            var seen = Set<Int>()
-            pairs = pairs.filter { seen.insert($0).inserted }
+            if pairs.count == 2 && pairs[0] == pairs[1] { pairs.removeLast() }
             for l in pairs where l + 1 < buffers.count {
                 guard let a = buffers[l].mData?.assumingMemoryBound(to: Float.self),
                       let b = buffers[l + 1].mData?.assumingMemoryBound(to: Float.self) else { continue }
