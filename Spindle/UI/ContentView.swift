@@ -230,7 +230,20 @@ extension ContentView {
                 model.toggleRecording()
             }
             model.page = page
+            var prepStart: (Double, Date)?
+            if page == .prep {
+                // Pre-listen check: play with the click for the snapshot wait.
+                try? await Task.sleep(for: .seconds(1))
+                model.prepSetMetronome(true)
+                model.prepSetPlaying(true)
+                prepStart = (model.prepPosition, Date())
+            }
             try? await Task.sleep(for: .seconds(page == .sessions ? 2 : 4))
+            if let (t0, d0) = prepStart {
+                spindleLog.notice(String(format: "Prep check: preview %@, moved %.2f s in %.2f s, output %d",
+                                         model.prepPage.preview == nil ? "not loaded" : "loaded",
+                                         model.prepPosition - t0, Date().timeIntervalSince(d0), model.engine?.previewOutput ?? -1))
+            }
             guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
                   let view = window.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
@@ -246,6 +259,10 @@ extension ContentView {
                 }
             }
             spindleLog.notice("Snapshot: \(url.path)")
+            if page == .prep {
+                model.prepSetPlaying(false)
+                model.prepSetMetronome(false)
+            }
         }
         model.setSimulatedPitch(0, deck: model.decks[0])
         for deck in model.decks { model.setPlaying(false, deck: deck) }

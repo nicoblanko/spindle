@@ -21,6 +21,14 @@ extension AppModel {
     }
 
     func setPageView(_ key: String, _ view: ViewSettings) { mixTabViews[key] = view }
+
+    /// The rows a page's list shows, in order.
+    func pageRecords(_ key: String) -> [Record] {
+        let base = library.visibleTracks.enumerated().map {
+            Record(track: $1, analysis: analysis.analysis(for: $1.url), index: $0 + 1)
+        }
+        return records.apply(pageView(key), to: base)
+    }
 }
 
 struct SharedTrackList: View {
@@ -42,12 +50,7 @@ struct SharedTrackList: View {
         Binding(get: { model.pageView(key) }, set: { model.setPageView(key, $0) })
     }
 
-    private var records: [Record] {
-        let base = library.visibleTracks.enumerated().map {
-            Record(track: $1, analysis: model.analysis.analysis(for: $1.url), index: $0 + 1)
-        }
-        return model.records.apply(view.wrappedValue, to: base)
-    }
+    private var records: [Record] { model.pageRecords(key) }
 
     var body: some View {
         let recs = records

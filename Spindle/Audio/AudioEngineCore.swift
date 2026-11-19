@@ -51,6 +51,11 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
     let definition: TimecodeDefinition
     let decks: [DeckEngine]
     let simulators: [TimecodeSimulator]
+    /// Prep's pre-listen player: its own transport, never recorded. Plays on
+    /// outputs 5–6 (the Xone's AUX/headphone pair) when the device has them
+    /// and the decks are on turntables; otherwise mixed onto outputs 1–2.
+    let preview: DeckEngine
+    var previewOutput = 0
     private(set) var bufferFrames: UInt32 = 0
 
     private var unit: AudioUnit?
@@ -90,6 +95,9 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
                  DeckEngine(definition: definition, sampleRate: sampleRate)]
         simulators = [TimecodeSimulator(definition: definition), TimecodeSimulator(definition: definition)]
         for deck in decks { deck.internalMode = laptop }
+        preview = DeckEngine(definition: definition, sampleRate: sampleRate)
+        preview.internalMode = true
+        previewOutput = !laptop && device.outputChannels >= 6 ? 4 : 0
 
         inputList = AudioBufferList.allocate(maximumBuffers: max(inputChannels, 1))
         var data: [UnsafeMutablePointer<Float>] = []
@@ -252,6 +260,14 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
                 }
             }
             recordTap.push(left: mixL, right: mixR, frames: frames)
+        }
+
+        // Pre-listen, after the recording tap so it's never in a recording.
+        let p = previewOutput + 1 < buffers.count ? previewOutput : 0
+        if p + 1 < buffers.count,
+           let left = buffers[p].mData?.assumingMemoryBound(to: Float.self),
+           let right = buffers[p + 1].mData?.assumingMemoryBound(to: Float.self) {
+            preview.render(left: left, right: right, frames: frames, mix: true)
         }
         return noErr
     }

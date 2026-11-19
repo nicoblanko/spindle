@@ -25,6 +25,9 @@ enum Theme {
     static let deckB = Color(hex: 0xc06a2b)
     static let match = Color(hex: 0x5fd37a)
     static let warn = Color(hex: 0xff5a4f)
+    static let waveLow = Color(hex: 0x3d6fb3)
+    static let waveMid = Color(hex: 0xa8b4c4)
+    static let waveHigh = Color(hex: 0xeef2f7)
 
     static let space1: CGFloat = 4
     static let space2: CGFloat = 8

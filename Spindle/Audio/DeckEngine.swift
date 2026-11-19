@@ -106,6 +106,19 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Length of one beat of the loaded track at its own tempo, for the echo.
     var beatSeconds: Double = 0.5
 
+    // MARK: Metronome (Prep preview)
+
+    /// Clicks on every beat of the grid: higher and louder on each bar's first beat.
+    var metronome = false
+    var gridOffset: Double = 0
+    var gridBeat: Double = 0.5
+    private var lastBeat = Int.min
+    private var clickPhase: Double = 0
+    private var clickEnv: Float = 0
+    private var clickFreq: Double = 1000
+    private var clickLevel: Float = 0
+    private let clickDecay: Float
+
     private var svfL1: Float = 0, svfL2: Float = 0, svfR1: Float = 0, svfR2: Float = 0
     private static let delayFrames = 1 << 17
     private let delayL: UnsafeMutablePointer<Float>
@@ -144,6 +157,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         decoders = DecoderConfig.all.map { TimecodeDecoder(config: $0, definition: definition, sampleRate: sampleRate) }
         canSearch = definition.decodesPosition
         confirmBits = Int(0.3 * definition.bitRate)
+        clickDecay = Float(exp(-1 / (0.025 * sampleRate)))
         telemetry = .allocate(capacity: 1)
         telemetry.initialize(to: DeckTelemetry())
         scope = .allocate(capacity: Self.scopeFrames * 2)
@@ -219,6 +233,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             playhead = jumpRequest
             trackOffset -= delta
             jumpRequest = .nan
+            lastBeat = Int.min
         }
         var position = 0.0
         var absolute = false
@@ -305,6 +320,27 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             currentGain += (gain - currentGain) * 0.002
             outL *= currentGain
             outR *= currentGain
+            if metronome && gridBeat > 0.05 {
+                let beatPos = (playhead - gridOffset) / gridBeat
+                let beat = beatPos >= 0 ? Int(beatPos) : Int(beatPos.rounded(.down))
+                if beat != lastBeat {
+                    if lastBeat != Int.min && r > 0.05 && beatPos - Double(beat) < 0.1 {
+                        let down = ((beat % 4) + 4) % 4 == 0
+                        clickFreq = down ? 1760 : 1175
+                        clickLevel = down ? 0.35 : 0.2
+                        clickEnv = 1
+                        clickPhase = 0
+                    }
+                    lastBeat = beat
+                }
+            }
+            if clickEnv > 0.001 {
+                let c = Float(sin(clickPhase)) * clickEnv * clickLevel * currentGain
+                clickPhase += 2 * .pi * clickFreq / sampleRate
+                clickEnv *= clickDecay
+                outL += c
+                outR += c
+            }
             if testTone {
                 let tone = Float(sin(tonePhase)) * 0.1
                 tonePhase += 2 * .pi * toneFrequency / sampleRate

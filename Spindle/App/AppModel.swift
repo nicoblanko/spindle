@@ -303,12 +303,15 @@ final class AppModel {
                 }
             }
         }
+        attachPreview()
     }
 
     func stop() {
         guard let engine else { return }
         engine.stop()
         for deck in engine.decks { _ = deck.exchangeTrack(nil) }
+        _ = engine.preview.exchangeTrack(nil)
+        prepPage.playing = false
         self.engine = nil
         running = false
     }
@@ -409,7 +412,7 @@ final class AppModel {
     }
 
     /// Frees sample memory once the audio thread has certainly moved on.
-    private func retire(_ samples: UnsafeMutablePointer<TrackSamples>) {
+    func retire(_ samples: UnsafeMutablePointer<TrackSamples>) {
         let address = Int(bitPattern: samples)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             guard let pointer = UnsafeMutablePointer<TrackSamples>(bitPattern: address) else { return }

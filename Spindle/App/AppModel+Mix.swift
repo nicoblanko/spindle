@@ -20,8 +20,17 @@ final class PrepPageModel {
     /// Position the Prep tools act on, in seconds.
     var cursor: Double = 0
     /// Seconds shown in the zoomed lane.
-    var zoom: Double = 32
+    var zoom: Double = 16
     var error: String?
+
+    // Pre-listen player
+    /// The selected track decoded for playback (and its detailed waveform).
+    var preview: LoadedTrack?
+    var playing = false
+    var metronome = false
+    var volume: Double = 0.8
+    /// The lane follows the playhead while playing.
+    var follow = true
 }
 
 extension AppModel {
@@ -145,6 +154,7 @@ extension AppModel {
         prepPage.error = nil
         prepPage.cursor = prep.prep(for: url)?.cue(.intro)?.time ?? 0
         prepPage.loading = true
+        loadPreview(url)
         let bpm = analysis.analysis(for: url)?.bpm
         Task {
             let result = await Task.detached(priority: .userInitiated) {
@@ -157,8 +167,9 @@ extension AppModel {
                 prepPage.waveform = suggestion
                 if prep.prep(for: url) == nil {
                     prep.set(suggestion.prep, for: url)
-                    prepPage.cursor = suggestion.prep.cue(.intro)?.time ?? 0
+                    if !prepPage.playing { prepSeek(to: suggestion.prep.cue(.intro)?.time ?? 0) }
                 }
+                syncPreviewGrid()
             case .failure(let error):
                 prepPage.error = error.localizedDescription
             }
@@ -179,6 +190,7 @@ extension AppModel {
                 p.cues = fresh.prep.cues
                 p.loops = fresh.prep.loops
             }
+            syncPreviewGrid()
             _ = suggestion
         }
     }
