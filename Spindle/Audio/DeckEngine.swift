@@ -19,6 +19,9 @@ nonisolated struct DeckTelemetry {
     /// Raw index in the timecode sequence; used to calibrate the record start.
     var positionIndex = -1
     var hasPosition = false
+    /// Locked now or within the last half second: what the UI shows, so a
+    /// short drop (holding the platter, a backspin) doesn't flicker.
+    var lockHeld = false
     var absolute = false
     var signal: Float = 0
     var activeConfig: Int32 = 0
@@ -70,6 +73,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// the first lock, if the record isn't locked yet).
     var cueRequest = false
     private var anchorPending = false
+    private var samplesSinceLock = Int.max / 2
 
     var toneFrequency: Double = 440
 
@@ -184,6 +188,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             playhead += r / sampleRate
         }
         rate = target
+        samplesSinceLock = decoder.hasPosition ? 0 : samplesSinceLock + frames
 
         telemetry.pointee = DeckTelemetry(
             pitch: decoder.pitch,
@@ -192,6 +197,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             timecodeSeconds: decoder.hasPosition ? position : telemetry.pointee.timecodeSeconds,
             positionIndex: decoder.hasPosition ? decoder.positionIndex : telemetry.pointee.positionIndex,
             hasPosition: decoder.hasPosition,
+            lockHeld: samplesSinceLock < Int(sampleRate * 0.5),
             absolute: absolute,
             signal: decoder.envelope,
             activeConfig: Int32(active),

@@ -32,6 +32,7 @@ struct DeckPanel: View {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 simulator.padding(Theme.space3)
             }
+            Spacer(minLength: 0)
         }
         .background(Theme.panel)
         .dropDestination(for: URL.self) { urls, _ in
@@ -71,7 +72,7 @@ struct DeckPanel: View {
             TrackOverview(deck: deck, telemetry: engine?.telemetry)
                 .frame(height: 32)
             WaveformLane(deck: deck, telemetry: engine?.telemetry)
-                .frame(minHeight: 140, maxHeight: .infinity)
+                .frame(height: 150)
         }
         .background(Theme.line)
     }
@@ -128,20 +129,22 @@ struct DeckPanel: View {
 
     @ViewBuilder
     private func live(_ t: DeckTelemetry) -> some View {
+        // Every element has a fixed size so nothing moves when lock or
+        // signal changes during mixing.
         HStack(alignment: .top, spacing: Theme.space4) {
             VStack(alignment: .leading, spacing: Theme.space2) {
                 Text(Self.clock(t.playhead))
                     .font(Theme.readoutXL)
                     .foregroundStyle(Theme.ink)
-                if let duration = deck.track?.duration {
-                    Text("−" + Self.clock(max(0, duration - t.playhead)))
-                        .font(Theme.readout)
-                        .foregroundStyle(Theme.inkMuted)
-                }
+                    .frame(width: 150, alignment: .leading)
+                Text(deck.track.map { "−" + Self.clock(max(0, $0.duration - t.playhead)) } ?? " ")
+                    .font(Theme.readout)
+                    .foregroundStyle(Theme.inkMuted)
+                    .frame(width: 150, alignment: .leading)
                 HStack(spacing: Theme.space3) {
-                    readout("Pitch", Self.pitch(t.pitch))
-                    readout("Dir", abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀"))
-                    readout("Mode", t.absolute ? "ABS" : "REL",
+                    readout("Pitch", Self.pitch(t.pitch), width: 84)
+                    readout("Dir", abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀"), width: 28)
+                    readout("Mode", t.absolute ? "ABS" : "REL", width: 40,
                             color: t.absolute ? Theme.ink : Theme.inkMuted)
                 }
             }
@@ -153,36 +156,38 @@ struct DeckPanel: View {
                         .frame(width: 96, height: 96)
                     VStack(alignment: .leading, spacing: Theme.space1) {
                         lockBadge(t)
-                        readout("Position", t.hasPosition ? Self.clock(t.timecodeSeconds) : "—")
-                        readout("Signal", Self.db(t.signal))
+                        readout("Position", t.lockHeld ? Self.clock(t.timecodeSeconds) : "—", width: 110)
+                        readout("Signal", Self.db(t.signal), width: 110)
                         SignalMeter(level: t.signal)
                             .frame(width: 96, height: 4)
-                        if t.hasPosition {
-                            Text(DecoderConfig.all[Int(t.activeConfig)].label)
-                                .font(Theme.readoutSm)
-                                .foregroundStyle(Theme.inkFaint)
-                        }
+                        Text(t.lockHeld ? DecoderConfig.all[Int(t.activeConfig)].label : " ")
+                            .font(Theme.readoutSm)
+                            .foregroundStyle(Theme.inkFaint)
+                            .frame(width: 130, alignment: .leading)
                     }
                 }
             }
         }
+        .frame(height: 140, alignment: .top)
     }
 
     private func lockBadge(_ t: DeckTelemetry) -> some View {
-        let noSignal = t.signal < 0.002
-        let text = noSignal ? "No signal" : (t.hasPosition ? "Locked" : "Searching")
-        let color = noSignal ? Theme.warn : (t.hasPosition ? Theme.match : Theme.inkMuted)
+        let noSignal = t.signal < 0.002 && !t.lockHeld
+        let text = noSignal ? "No signal" : (t.lockHeld ? "Locked" : "Searching")
+        let color = noSignal ? Theme.warn : (t.lockHeld ? Theme.match : Theme.inkMuted)
         return HStack(spacing: Theme.space1) {
             Circle().fill(color).frame(width: 6, height: 6)
             LabelText(text, color: color)
         }
+        .frame(width: 110, alignment: .leading)
     }
 
-    private func readout(_ label: String, _ value: String, color: Color = Theme.ink) -> some View {
+    private func readout(_ label: String, _ value: String, width: CGFloat, color: Color = Theme.ink) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             LabelText(label, color: Theme.inkFaint)
-            Text(value).font(Theme.readout).foregroundStyle(color)
+            Text(value).font(Theme.readout).foregroundStyle(color).lineLimit(1)
         }
+        .frame(width: width, alignment: .leading)
     }
 
     private var simulator: some View {

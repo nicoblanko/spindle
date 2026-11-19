@@ -102,6 +102,9 @@ nonisolated final class TimecodeDecoder {
     private var cyclesSinceVoteDecay = 0
 
     static let lockBits = 24
+    /// Consecutive mismatching bits tolerated while locked.
+    static let flywheelBits = 4
+    private var misses = 0
 
     init(config: DecoderConfig, definition: TimecodeDefinition, sampleRate: Double) {
         self.config = config
@@ -309,9 +312,17 @@ nonisolated final class TimecodeDecoder {
 
         if timecode == bitstream {
             validBits += 1
+            misses = 0
+        } else if validBits >= Self.lockBits && misses < Self.flywheelBits {
+            // Flywheel: once locked, a few bad bits (dust, a nudge, a change
+            // of direction) don't drop the lock. Trust the prediction and
+            // correct the register; give up after several misses in a row.
+            misses += 1
+            bitstream = timecode
         } else {
             timecode = bitstream
             validBits = 0
+            misses = 0
         }
 
         if validBits >= Self.lockBits {
