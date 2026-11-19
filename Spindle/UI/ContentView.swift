@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 import OSLog
 
 struct ContentView: View {
-    @State private var model = AppModel()
+    @Bindable var model: AppModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,6 +111,14 @@ extension ContentView {
             model.library.playlist = list
             model.organizeSelection = [tracks[0].url]
             testFolder = folder
+            // Delete → Recently deleted → restore.
+            try? await Task.sleep(for: .seconds(1))
+            let before = store.node(list)?.tracks.count ?? 0
+            store.delete(list)
+            let inTrash = store.trash.first?.name == "Warm-up" && store.node(list) == nil
+            if let entry = store.trash.first { store.restore(entry) }
+            let back = store.node(list)?.tracks.count ?? -1
+            spindleLog.notice("Restore test: \(before) tracks; in Recently deleted after delete: \(inTrash); after restore: \(back) tracks, parent kept: \(store.node(list)?.parent == folder)")
             try? await Task.sleep(for: .seconds(8))      // let the outside file be analysed
         }
         // Field test: tags, a single-select and a rating field, grouped and
@@ -220,6 +228,9 @@ extension ContentView {
         if let testFolder {
             model.library.selectAll()
             model.library.playlists.delete(testFolder)
+            if let entry = model.library.playlists.trash.first(where: { $0.nodes.first?.id == testFolder }) {
+                model.library.playlists.purge(entry)
+            }
         }
         model.page = original
     }

@@ -751,6 +751,7 @@ struct CrateList: View {
     /// Tempo group being edited (or a new one).
     @State private var editingGroup: TagDef?
     @State private var editingTags = false
+    @State private var showDeleted = false
 
     private var store: PlaylistStore { library.playlists }
 
@@ -786,6 +787,7 @@ struct CrateList: View {
                     .padding(.top, Theme.space4)
                     .padding(.bottom, Theme.space2)
                     tree(parent: nil, depth: 0)
+                    recentlyDeleted
                     if store.nodes.isEmpty {
                         Text("Make a playlist for each set. Add tracks from anywhere: drag them in, or right-click a track.")
                             .font(Theme.caption).foregroundStyle(Theme.inkFaint)
@@ -820,8 +822,54 @@ struct CrateList: View {
             }
         } message: {
             Text(pendingDelete?.isFolder == true
-                 ? "The folder and the playlists in it are removed from Spindle. Your audio files stay where they are."
-                 : "The playlist is removed from Spindle. Your audio files stay where they are.")
+                 ? "The folder and its playlists move to Recently deleted, where you can restore them for 30 days. Your audio files stay where they are."
+                 : "The playlist moves to Recently deleted, where you can restore it for 30 days. Your audio files stay where they are.")
+        }
+    }
+
+    // MARK: Recently deleted
+
+    @ViewBuilder
+    private var recentlyDeleted: some View {
+        if !store.trash.isEmpty {
+            Button { showDeleted.toggle() } label: {
+                HStack(spacing: Theme.space1) {
+                    Image(systemName: showDeleted ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                    Image(systemName: "trash").font(.system(size: 11)).frame(width: 14)
+                    Text("Recently deleted").font(Theme.body)
+                    Spacer()
+                    Text("\(store.trash.count)").font(Theme.readoutSm)
+                }
+                .foregroundStyle(Theme.inkMuted)
+                .padding(.leading, Theme.space2)
+                .padding(.trailing, Theme.space3)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Deleted playlists are kept here for 30 days")
+            if showDeleted {
+                ForEach(store.trash) { entry in
+                    HStack(spacing: Theme.space1) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(entry.name).font(Theme.body).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                            Text("\(entry.trackCount) tracks · \(entry.deleted.formatted(date: .abbreviated, time: .shortened))")
+                                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                        }
+                        Spacer()
+                        Button("Restore") { store.restore(entry) }
+                            .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.ink)
+                    }
+                    .padding(.leading, Theme.space2 + 24)
+                    .padding(.trailing, Theme.space3)
+                    .padding(.vertical, 3)
+                    .contextMenu {
+                        Button("Restore") { store.restore(entry) }
+                        Button("Delete permanently", role: .destructive) { store.purge(entry) }
+                    }
+                }
+            }
         }
     }
 

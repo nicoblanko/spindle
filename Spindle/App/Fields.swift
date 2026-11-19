@@ -139,7 +139,7 @@ final class FieldStore {
         let snapshot = Saved(fields: fields, values: values)
         Self.writer.async {
             if let data = try? JSONEncoder().encode(snapshot) {
-                try? data.write(to: Self.fileURL, options: .atomic)
+                SafeWrite.write(data, to: Self.fileURL)
             }
         }
     }

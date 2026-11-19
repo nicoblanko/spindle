@@ -220,7 +220,7 @@ final class TagStore {
         let snapshot = Saved(tags: tags, assigned: assigned)
         Self.writer.async {
             if let data = try? JSONEncoder().encode(snapshot) {
-                try? data.write(to: Self.fileURL, options: .atomic)
+                SafeWrite.write(data, to: Self.fileURL)
             }
         }
     }
