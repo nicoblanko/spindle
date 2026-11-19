@@ -36,35 +36,127 @@ nonisolated enum CueRole: Int, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-nonisolated struct Cue: Codable, Sendable, Equatable {
-    var role: CueRole
+/// A cue point. Any number per track; its slot number (1, 2, 3…) is its
+/// place in the list, which is what the number keys and pads use. `kind`
+/// remembers which suggestion placed it (IN, DROP…), if any.
+nonisolated struct Cue: Codable, Sendable, Equatable, Identifiable {
+    var id = UUID()
     /// Seconds into the track.
     var time: Double
+    var name: String
+    /// Index into `Cue.palette`.
+    var color: Int
     /// Placed by the auto-suggestion rather than by hand.
-    var auto: Bool
+    var auto: Bool = false
+    var kind: CueRole?
+
+    /// The four style-guide cue colours first, then four more.
+    static let paletteHex: [UInt32] = [0x2fbf71, 0xe6c229, 0x3fb6d9, 0xd9534f, 0x9b7bd9, 0xd96fa8, 0x5fd3c4, 0x9a9aa1]
+    static var palette: [Color] { paletteHex.map { Color(hex: $0) } }
+    var swatch: Color { Color(hex: Self.paletteHex[(color % Self.paletteHex.count + Self.paletteHex.count) % Self.paletteHex.count]) }
+
+    init(time: Double, name: String, color: Int, auto: Bool = false, kind: CueRole? = nil) {
+        self.time = time; self.name = name; self.color = color; self.auto = auto; self.kind = kind
+    }
+
+    private enum Keys: String, CodingKey { case id, time, name, color, auto, kind, role }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        time = try c.decode(Double.self, forKey: .time)
+        auto = try c.decodeIfPresent(Bool.self, forKey: .auto) ?? false
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        // Older files stored a fixed role (1 IN … 4 OUT).
+        let role = try c.decodeIfPresent(CueRole.self, forKey: .role)
+        kind = try c.decodeIfPresent(CueRole.self, forKey: .kind) ?? role
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? role?.name ?? "CUE"
+        color = try c.decodeIfPresent(Int.self, forKey: .color) ?? ((role?.rawValue ?? 1) - 1)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(id, forKey: .id); try c.encode(time, forKey: .time); try c.encode(name, forKey: .name)
+        try c.encode(color, forKey: .color); try c.encode(auto, forKey: .auto); try c.encodeIfPresent(kind, forKey: .kind)
+    }
 }
 
+/// A loop slot: an in-point and a length in bars.
 nonisolated struct SavedLoop: Codable, Sendable, Equatable, Identifiable {
     var id = UUID()
     var start: Double
     var beats: Int
+    var bars: Double { Double(beats) / 4 }
+    static let barChoices: [Double] = [0.25, 0.5, 1, 2, 4, 8, 16, 32]
+    static func barLabel(_ bars: Double) -> String {
+        bars == 0.25 ? "¼" : bars == 0.5 ? "½" : "\(Int(bars))"
+    }
+}
+
+/// The FX on a clip or deck.
+nonisolated enum FXKind: String, CaseIterable, Identifiable, Sendable {
+    case filter, echo, reverb, flanger, crush, gate
+    var id: String { rawValue }
+    var short: String {
+        switch self {
+        case .filter: "FILTER"
+        case .echo: "ECHO"
+        case .reverb: "VERB"
+        case .flanger: "FLANGE"
+        case .crush: "CRUSH"
+        case .gate: "GATE"
+        }
+    }
+    /// Filter runs −1 (low-pass) … 1 (high-pass); the rest 0 … 1.
+    var bipolar: Bool { self == .filter }
 }
 
 /// FX that travel with a clip: applied to the deck when the clip is loaded.
 nonisolated struct ClipFX: Codable, Sendable, Equatable {
-    /// −1 … 1: negative is a low-pass, positive a high-pass, 0 is off.
     var filter: Double = 0
-    /// 0 … 1: echo amount (wet level and feedback).
     var echo: Double = 0
+    var reverb: Double = 0
+    var flanger: Double = 0
+    var crush: Double = 0
+    var gate: Double = 0
 
-    var isEmpty: Bool { abs(filter) < 0.01 && echo < 0.01 }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        for kind in FXKind.allCases {
+            if let key = CodingKeys(stringValue: kind.rawValue), let v = try c.decodeIfPresent(Double.self, forKey: key) { self[kind] = v }
+        }
+    }
+
+    subscript(kind: FXKind) -> Double {
+        get {
+            switch kind {
+            case .filter: filter
+            case .echo: echo
+            case .reverb: reverb
+            case .flanger: flanger
+            case .crush: crush
+            case .gate: gate
+            }
+        }
+        set {
+            switch kind {
+            case .filter: filter = newValue
+            case .echo: echo = newValue
+            case .reverb: reverb = newValue
+            case .flanger: flanger = newValue
+            case .crush: crush = newValue
+            case .gate: gate = newValue
+            }
+        }
+    }
+
+    var isEmpty: Bool { FXKind.allCases.allSatisfy { abs(self[$0]) < 0.01 } }
 
     var summary: String {
-        var parts: [String] = []
-        if filter < -0.01 { parts.append("LP \(Int(-filter * 100))") }
-        if filter > 0.01 { parts.append("HP \(Int(filter * 100))") }
-        if echo > 0.01 { parts.append("ECHO \(Int(echo * 100))") }
-        return parts.joined(separator: " · ")
+        FXKind.allCases.compactMap { kind -> String? in
+            let v = self[kind]
+            guard abs(v) > 0.01 else { return nil }
+            if kind == .filter { return (v < 0 ? "LP " : "HP ") + "\(Int(abs(v) * 100))" }
+            return "\(kind.short) \(Int(v * 100))"
+        }.joined(separator: " · ")
     }
 }
 
@@ -80,12 +172,27 @@ nonisolated struct TrackPrep: Codable, Sendable, Equatable {
 
     var beatSeconds: Double { 60 / bpm }
 
-    func cue(_ role: CueRole) -> Cue? { cues.first { $0.role == role } }
+    /// The cue the suggestion placed for this role (IN, DROP…).
+    func cue(_ role: CueRole) -> Cue? { cues.first { $0.kind == role } }
 
+    /// Sets the suggested cue for a role, replacing the previous one.
     mutating func setCue(_ role: CueRole, time: Double?, auto: Bool = false) {
-        cues.removeAll { $0.role == role }
-        if let time { cues.append(Cue(role: role, time: time, auto: auto)) }
-        cues.sort { $0.role.rawValue < $1.role.rawValue }
+        if let i = cues.firstIndex(where: { $0.kind == role }) {
+            if let time { cues[i].time = time; cues[i].auto = auto } else { cues.remove(at: i) }
+        } else if let time {
+            cues.append(Cue(time: time, name: role.name, color: role.rawValue - 1, auto: auto, kind: role))
+        }
+    }
+
+    /// Cue slot `n` (0-based): moves it here, or adds a new cue.
+    mutating func setCue(slot n: Int, time: Double) {
+        if cues.indices.contains(n) { cues[n].time = time; cues[n].auto = false }
+        else { addCue(at: time) }
+    }
+
+    mutating func addCue(at time: Double) {
+        let n = cues.count
+        cues.append(Cue(time: time, name: "CUE \(n + 1)", color: n % Cue.paletteHex.count))
     }
 
     /// Nearest beat to `time`.

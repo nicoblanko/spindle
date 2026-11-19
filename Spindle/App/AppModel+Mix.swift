@@ -29,8 +29,8 @@ final class PrepPageModel {
     var playing = false
     var metronome = false
     var volume: Double = 0.8
-    /// The lane follows the playhead while playing.
-    var follow = true
+    /// The loop slot looping in the player, if any.
+    var activeLoop: UUID?
 }
 
 extension AppModel {
@@ -202,22 +202,51 @@ extension AppModel {
     /// Applies a clip's FX and tempo to the deck it was loaded on.
     func applyClip(_ url: URL, to deck: DeckModel) {
         let p = prep.prep(for: url)
-        setFilter(p?.fx.filter ?? 0, deck: deck)
-        setEcho(p?.fx.echo ?? 0, deck: deck)
+        let clipFX = p?.fx ?? ClipFX()
+        for kind in FXKind.allCases { setFX(kind, clipFX[kind], deck: deck) }
         setLoop(false, deck: deck)
         let beat = p?.beatSeconds ?? analysis.analysis(for: url).map { 60 / $0.bpm } ?? 0.5
         engine?.decks[deck.id].beatSeconds = beat
+        engine?.decks[deck.id].gridBeat = beat
+        engine?.decks[deck.id].gridOffset = p?.gridOffset ?? 0
     }
 
-    /// Jumps the deck to a cue. The record keeps control from there.
-    func jump(deck: DeckModel, to role: CueRole) {
-        guard let url = deck.track?.url, let cue = prep.prep(for: url)?.cue(role) else { return }
-        engine?.decks[deck.id].jumpRequest = cue.time
+    /// Jumps the deck to cue slot `n` (0-based). The record keeps control from there.
+    func jump(deck: DeckModel, toCue n: Int) {
+        guard let url = deck.track?.url, let cues = prep.prep(for: url)?.cues, cues.indices.contains(n) else { return }
+        engine?.decks[deck.id].jumpRequest = cues[n].time
+    }
+
+    /// Plays a loop slot on a deck: jumps to its in-point and loops it.
+    /// Pressing the playing slot again lets the track run on.
+    func playLoopSlot(_ loop: SavedLoop, deck: DeckModel) {
+        guard let url = deck.track?.url, let p = prep.prep(for: url), let e = engine?.decks[deck.id] else { return }
+        if deck.loopActive && deck.activeSlot == loop.id {
+            setLoop(false, deck: deck)
+            deck.activeSlot = nil
+            return
+        }
+        e.loopActive = false
+        e.jumpRequest = loop.start
+        e.loopStart = loop.start
+        e.loopLength = Double(loop.beats) * p.beatSeconds
+        e.loopActive = true
+        deck.loopActive = true
+        deck.activeSlot = loop.id
+    }
+
+    func setFX(_ kind: FXKind, _ value: Double, deck: DeckModel, fromMIDI: Bool = false) {
+        deck.fx[kind] = value
+        engine?.decks[deck.id].setFX(kind, value)
+        if !fromMIDI, kind == .filter || kind == .echo {
+            midi.release(MIDITarget(deck: deck.id, action: kind == .filter ? .filter : .echo))
+        }
     }
 
     /// Starts a loop of `deck.loopBeats` beats on the nearest beat, or ends it.
     func setLoop(_ on: Bool, deck: DeckModel) {
         deck.loopActive = on
+        deck.activeSlot = nil
         guard let engine else { return }
         let e = engine.decks[deck.id]
         if on {
@@ -279,10 +308,10 @@ extension AppModel {
             }
             let deck = self.decks[id]
             switch target.action {
-            case .cue1: self.jump(deck: deck, to: .intro)
-            case .cue2: self.jump(deck: deck, to: .drop)
-            case .cue3: self.jump(deck: deck, to: .breakdown)
-            case .cue4: self.jump(deck: deck, to: .outro)
+            case .cue1: self.jump(deck: deck, toCue: 0)
+            case .cue2: self.jump(deck: deck, toCue: 1)
+            case .cue3: self.jump(deck: deck, toCue: 2)
+            case .cue4: self.jump(deck: deck, toCue: 3)
             case .loop: self.setLoop(!deck.loopActive, deck: deck)
             case .loopHalve: self.setLoopBeats(deck.loopBeats / 2, deck: deck)
             case .loopDouble: self.setLoopBeats(deck.loopBeats * 2, deck: deck)
@@ -311,7 +340,7 @@ extension AppModel {
     /// Back to the IN cue (or the start) and stop, like a CDJ's cue button.
     func cue(deck: DeckModel) {
         setPlaying(false, deck: deck)
-        let start = deck.track.flatMap { prep.prep(for: $0.url)?.cue(.intro)?.time } ?? 0
+        let start = deck.track.flatMap { t in prep.prep(for: t.url).flatMap { $0.cue(.intro) ?? $0.cues.first }?.time } ?? 0
         engine?.decks[deck.id].jumpRequest = start
     }
 

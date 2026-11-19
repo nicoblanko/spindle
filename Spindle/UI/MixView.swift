@@ -156,10 +156,10 @@ private struct LoadBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Rectangle().fill(Theme.line).frame(height: 2)
-                ForEach(prep?.cues ?? [], id: \.role) { cue in
-                    Rectangle().fill(cue.role.color).frame(width: 2, height: 14)
+                ForEach(prep?.cues ?? []) { cue in
+                    Rectangle().fill(cue.swatch).frame(width: 2, height: 14)
                         .offset(x: CGFloat(cue.time / max(duration, 1)) * geo.size.width)
-                        .help("\(cue.role.rawValue) \(cue.role.name)")
+                        .help(cue.name)
                 }
             }
             .frame(maxHeight: .infinity)
@@ -183,7 +183,8 @@ private struct LoadBar: View {
 
 // MARK: Deck performance strip
 
-/// Cue pads, loop and FX under each deck on the Mix page.
+/// Cue pads, loop slots and FX under each deck on the Mix page: the
+/// compact version of what you set up on Prep.
 private struct DeckPerformance: View {
     @Bindable var deck: DeckModel
     let model: AppModel
@@ -191,49 +192,63 @@ private struct DeckPerformance: View {
     var body: some View {
         let prep = deck.track.flatMap { model.prep.prep(for: $0.url) }
         HStack(spacing: Theme.space2) {
-            ForEach(CueRole.allCases) { role in
-                let cue = prep?.cue(role)
+            // Cues: the first eight.
+            HStack(spacing: 3) {
+                let cues = Array((prep?.cues ?? []).prefix(8))
+                ForEach(Array(cues.enumerated()), id: \.element.id) { n, cue in
+                    Button { model.jump(deck: deck, toCue: n) } label: {
+                        Text("\(n + 1)")
+                            .font(Theme.label)
+                            .foregroundStyle(Theme.onAccent)
+                            .frame(width: 24, height: 22)
+                            .background(cue.swatch)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(cue.name) · \(PrepEditorClock.clock(cue.time))")
+                }
+                if cues.isEmpty {
+                    Text("No cues").font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                }
+            }
+            Divider().frame(height: 20)
+            // Loop slots from Prep, then the free loop.
+            HStack(spacing: 3) {
+                ForEach(Array((prep?.loops ?? []).prefix(6).enumerated()), id: \.element.id) { n, loop in
+                    let on = deck.loopActive && deck.activeSlot == loop.id
+                    Button { model.playLoopSlot(loop, deck: deck) } label: {
+                        Text(SavedLoop.barLabel(loop.bars))
+                            .font(Theme.readoutSm)
+                            .foregroundStyle(on ? Theme.onAccent : Theme.ink)
+                            .frame(minWidth: 24, minHeight: 22)
+                            .background(on ? Theme.match : Theme.control)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Loop slot \(n + 1): \(SavedLoop.barLabel(loop.bars)) bars from \(PrepEditorClock.clock(loop.start))")
+                }
                 Button {
-                    model.jump(deck: deck, to: role)
+                    model.setLoop(!(deck.loopActive && deck.activeSlot == nil), deck: deck)
                 } label: {
-                    Text("\(role.rawValue) \(role.name)")
+                    let on = deck.loopActive && deck.activeSlot == nil
+                    Text("LOOP \(deck.loopBeats)")
                         .font(Theme.label)
-                        .foregroundStyle(cue == nil ? Theme.inkFaint : Theme.onAccent)
-                        .frame(width: 52, height: 22)
-                        .background(cue == nil ? Theme.control : role.color)
+                        .foregroundStyle(on ? Theme.onAccent : Theme.ink)
+                        .frame(width: 58, height: 22)
+                        .background(on ? Theme.match : Theme.control)
                         .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
                 }
                 .buttonStyle(.plain)
-                .disabled(cue == nil)
-                .help(cue.map { "Jump to \(role.name) at \(PrepEditorClock.clock($0.time))" } ?? "\(role.name) not set (Prep page)")
+                .disabled(deck.track == nil)
+                .help("Loop \(deck.loopBeats) beats from the beat just played")
+                Button("÷2") { model.setLoopBeats(deck.loopBeats / 2, deck: deck) }.buttonStyle(SmallButtonStyle())
+                Button("×2") { model.setLoopBeats(deck.loopBeats * 2, deck: deck) }.buttonStyle(SmallButtonStyle())
             }
-            Divider().frame(height: 20)
-            Button {
-                model.setLoop(!deck.loopActive, deck: deck)
-            } label: {
-                Text("LOOP \(deck.loopBeats)")
-                    .font(Theme.label)
-                    .foregroundStyle(deck.loopActive ? Theme.onAccent : Theme.ink)
-                    .frame(width: 64, height: 22)
-                    .background(deck.loopActive ? Theme.match : Theme.control)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
-            }
-            .buttonStyle(.plain)
-            .disabled(deck.track == nil)
-            Button("÷2") { model.setLoopBeats(deck.loopBeats / 2, deck: deck) }.buttonStyle(FlatButtonStyle())
-            Button("×2") { model.setLoopBeats(deck.loopBeats * 2, deck: deck) }.buttonStyle(FlatButtonStyle())
-            Divider().frame(height: 20)
-            Text("FLT").font(Theme.label).foregroundStyle(Theme.inkMuted)
-            Slider(value: Binding(get: { deck.filter }, set: { model.setFilter(abs($0) < 0.03 ? 0 : $0, deck: deck) }), in: -1...1)
-                .frame(width: 90)
-            Text("ECHO").font(Theme.label).foregroundStyle(Theme.inkMuted)
-            Slider(value: Binding(get: { deck.echo }, set: { model.setEcho($0, deck: deck) }), in: 0...1)
-                .frame(width: 70)
-            Spacer(minLength: 0)
+            Spacer(minLength: Theme.space2)
+            FXKnobs(fx: deck.fx, size: 24, spacing: 6, tint: deck.color) { kind, v in model.setFX(kind, v, deck: deck) }
         }
-        .tint(deck.color)
         .padding(.horizontal, Theme.space3)
-        .padding(.vertical, Theme.space2)
+        .padding(.vertical, 6)
         .background(Theme.panelRaised)
     }
 }

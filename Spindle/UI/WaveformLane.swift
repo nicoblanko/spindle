@@ -130,12 +130,12 @@ struct WaveformLane: View {
         }
 
         if let prep {
-            for cue in prep.cues {
+            for (n, cue) in prep.cues.enumerated() {
                 let x = centreX + CGFloat((cue.time - playhead) / secondsPerPoint)
                 guard x > -40 && x < size.width else { continue }
-                context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.role.color))
-                context.fill(Path(CGRect(x: x, y: 0, width: 14, height: 12)), with: .color(cue.role.color))
-                context.draw(Text("\(cue.role.rawValue)").font(Theme.label).foregroundStyle(Theme.onAccent), at: CGPoint(x: x + 7, y: 6))
+                context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.swatch))
+                context.fill(Path(CGRect(x: x, y: 0, width: 14, height: 12)), with: .color(cue.swatch))
+                context.draw(Text("\(n + 1)").font(Theme.label).foregroundStyle(Theme.onAccent), at: CGPoint(x: x + 7, y: 6))
             }
         }
 

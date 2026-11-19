@@ -34,7 +34,11 @@ struct PrepView: View {
             .frame(maxHeight: .infinity)
         }
         .background(Theme.line)
-        .onAppear { keys.install(model) }
+        .onAppear {
+            keys.install(model)
+            // Don't start with the cursor in the search field.
+            DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
+        }
         .onDisappear {
             keys.remove()
             model.prepSetPlaying(false)
@@ -54,22 +58,6 @@ struct PrepView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.panel)
-        }
-    }
-}
-
-/// Four small dots in the cue colours; hollow when the cue isn't set.
-struct CueDots: View {
-    let prep: TrackPrep?
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(CueRole.allCases) { role in
-                let set = prep?.cue(role) != nil
-                Circle()
-                    .fill(set ? role.color : Color.clear)
-                    .overlay(Circle().stroke(set ? role.color : Theme.inkFaint.opacity(0.6), lineWidth: 1))
-                    .frame(width: 6, height: 6)
-            }
         }
     }
 }
@@ -95,16 +83,25 @@ final class PrepKeys {
 
     deinit { remove() }
 
-    static let help = "space play · 1–4 jump to cue · ⇧1–4 set cue · ← → bar · ⇧← → beat · ↑ ↓ track · D downbeat · [ ] nudge grid · C click · M mix-ready"
+    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · C click · M mix-ready"
+    /// Key codes of the number keys 1–9.
+    static let numberKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
     private static func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
-        // Typing in a field (search, notes, rename) keeps its keys.
-        if event.window?.firstResponder is NSText { return false }
+        // Typing in a field (search, notes, rename) keeps its keys, except
+        // space in an empty field and Escape, which hand the keys back.
+        if let text = event.window?.firstResponder as? NSText {
+            if event.keyCode == 53 || (event.keyCode == 49 && text.string.isEmpty) {
+                event.window?.makeFirstResponder(nil)
+                if event.keyCode == 49 { model.prepTogglePlay() }
+                return true
+            }
+            return false
+        }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) { return false }
         let shift = flags.contains(.shift)
         let page = model.prepPage
-        let cueKeys: [UInt16: CueRole] = [18: .intro, 19: .drop, 20: .breakdown, 21: .outro]
 
         switch event.keyCode {
         case 49: model.prepTogglePlay()
@@ -115,14 +112,16 @@ final class PrepKeys {
         case 33: model.prepEdit { $0.gridOffset -= 0.005 }
         case 30: model.prepEdit { $0.gridOffset += 0.005 }
         default:
-            if let role = cueKeys[event.keyCode] {
-                if shift { model.prepSetCue(role) } else { model.prepJump(role) }
+            if let n = numberKeys.firstIndex(of: event.keyCode) {
+                if shift { model.prepSetCue(slot: n) } else { model.prepJump(cue: n) }
                 return true
             }
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "d": model.prepDownbeatHere()
             case "c": model.prepSetMetronome(!page.metronome)
             case "m": model.prepEdit { $0.mixReady.toggle() }
+            case "q": model.prepAddCue()
+            case "l": model.prepAddLoop()
             default: return false
             }
         }
@@ -137,7 +136,8 @@ private struct PrepEditor: View {
     let prep: TrackPrep
     let model: AppModel
     @Bindable var page: PrepPageModel
-    @State private var newLoopBeats = 16
+    @State private var showGrid = false
+    @State private var editingCue: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -156,7 +156,7 @@ private struct PrepEditor: View {
                 }
             Rectangle().fill(Theme.line).frame(height: 1)
             tools
-                .frame(height: 150)
+                .frame(height: 128)
         }
         .background(Theme.panel)
     }
@@ -196,7 +196,6 @@ private struct PrepEditor: View {
                 Text(url.deletingPathExtension().lastPathComponent)
                     .font(Theme.title).foregroundStyle(Theme.ink).lineLimit(1)
                 HStack(spacing: Theme.space3) {
-                    Text(String(format: "%.2f BPM", prep.bpm))
                     if let a = model.analysis.analysis(for: url) {
                         Text("\(a.camelotNumber) \(KeyStyle.mood(minor: a.keyMinor))")
                         Text("E\(a.energy)")
@@ -207,6 +206,21 @@ private struct PrepEditor: View {
             .frame(minWidth: 120, alignment: .leading)
 
             Spacer(minLength: Theme.space2)
+
+            Button { showGrid.toggle() } label: {
+                HStack(spacing: 4) {
+                    Text(String(format: "%.2f", prep.bpm)).font(Theme.readout)
+                    Text("BPM").font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.inkMuted)
+                }
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, Theme.space2).frame(height: 24)
+                .background(Theme.control)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            }
+            .buttonStyle(.plain)
+            .help("Tempo and beatgrid")
+            .popover(isPresented: $showGrid, arrowEdge: .bottom) { gridPopover }
 
             Button { model.prepSetMetronome(!page.metronome) } label: {
                 Label("Click", systemImage: "metronome")
@@ -259,8 +273,9 @@ private struct PrepEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 1) {
                 cueTools
-                gridTools
+                    .frame(maxWidth: .infinity)
                 loopTools
+                    .frame(width: 420)
                 fxTools
             }
             .background(Theme.line)
@@ -274,63 +289,162 @@ private struct PrepEditor: View {
         }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Trailing: View, Content: View>(_ title: String, @ViewBuilder trailing: () -> Trailing,
+                                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.space2) {
-            LabelText(title)
+            HStack(spacing: Theme.space2) {
+                LabelText(title)
+                Spacer(minLength: 0)
+                trailing()
+            }
             content()
             Spacer(minLength: 0)
         }
-        .padding(Theme.space3)
+        .padding(.horizontal, Theme.space3).padding(.top, Theme.space2).padding(.bottom, Theme.space2)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.panel)
     }
 
+    // Cues: as many as you like, each with a name and colour. Its number is
+    // its place in the row (the number keys and pads use it).
+
     private var cueTools: some View {
         section("Cues") {
-            HStack(spacing: Theme.space2) {
-                ForEach(CueRole.allCases) { cuePad($0) }
+            Button { model.prepAddCue() } label: { Label("Cue", systemImage: "plus") }
+                .buttonStyle(SmallButtonStyle())
+                .help("New cue on the beat at the playhead (Q)")
+        } content: {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.space2) {
+                    ForEach(Array(prep.cues.enumerated()), id: \.element.id) { n, cue in cueCard(n, cue) }
+                    if prep.cues.isEmpty {
+                        Text("No cues yet. Play to a spot and press Q.")
+                            .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    }
+                }
             }
         }
     }
 
-    private func cuePad(_ role: CueRole) -> some View {
-        let cue = prep.cue(role)
-        return VStack(alignment: .leading, spacing: 3) {
+    private func cueCard(_ n: Int, _ cue: Cue) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
-                Text("\(role.rawValue) \(role.name)").font(Theme.label).foregroundStyle(role.color)
+                Text("\(n + 1)").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
+                Text(cue.name).font(Theme.label).foregroundStyle(cue.swatch).lineLimit(1)
                 Spacer(minLength: 0)
-                if cue?.auto == true { Text("auto").font(Theme.caption).foregroundStyle(Theme.inkFaint) }
             }
-            Button { model.prepJump(role) } label: {
-                Text(cue.map { Self.clock($0.time) } ?? "—")
-                    .font(Theme.readout)
-                    .foregroundStyle(cue == nil ? Theme.inkFaint : Theme.ink)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .disabled(cue == nil)
-            .help("Jump here (\(role.rawValue))")
-            HStack(spacing: 4) {
-                Button("Set") { model.prepSetCue(role) }
-                    .help("On the beat nearest the playhead (⇧\(role.rawValue))")
-                Button { model.prepEdit { $0.setCue(role, time: nil) } } label: { Image(systemName: "xmark") }
-                    .disabled(cue == nil)
-                    .help("Clear")
-            }
-            .buttonStyle(SmallButtonStyle())
+            Text(Self.clock(cue.time))
+                .font(Theme.readout)
+                .foregroundStyle(Theme.ink)
         }
         .padding(.vertical, 6).padding(.leading, 9).padding(.trailing, 6)
-        .frame(width: 112)
+        .frame(width: 104, alignment: .leading)
         .background(Theme.panelRaised)
-        .overlay(alignment: .leading) { Rectangle().fill(role.color).frame(width: 3) }
+        .overlay(alignment: .leading) { Rectangle().fill(cue.swatch).frame(width: 3) }
+        .contentShape(Rectangle())
+        .onTapGesture { model.prepJump(cue: n) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { editingCue = cue.id })
+        .help("Click to jump (\(n + 1)) · double-click to edit · ⇧\(n + 1) moves it to the playhead")
+        .contextMenu {
+            Button("Edit…") { editingCue = cue.id }
+            Button("Move to playhead") { model.prepSetCue(slot: n) }
+            Divider()
+            Button("Delete", role: .destructive) { model.prepEdit { $0.cues.removeAll { $0.id == cue.id } } }
+        }
+        .popover(isPresented: Binding(get: { editingCue == cue.id }, set: { if !$0 { editingCue = nil } })) {
+            CueEditor(cue: cue, number: n + 1,
+                      onChange: { new in model.prepEdit { p in if let i = p.cues.firstIndex(where: { $0.id == cue.id }) { p.cues[i] = new } } },
+                      onMove: { d in model.prepEdit { p in
+                          guard let i = p.cues.firstIndex(where: { $0.id == cue.id }), p.cues.indices.contains(i + d) else { return }
+                          p.cues.swapAt(i, i + d) } },
+                      onDelete: { editingCue = nil; model.prepEdit { $0.cues.removeAll { $0.id == cue.id } } })
+        }
     }
 
-    private var gridTools: some View {
-        section("Beatgrid") {
+    // Loop slots: an in-point and a length in bars. They travel to the Mix
+    // page, where each deck has them as small buttons.
+
+    private var loopTools: some View {
+        section("Loop slots") {
+            Button { model.prepAddLoop() } label: { Label("Loop", systemImage: "plus") }
+                .buttonStyle(SmallButtonStyle())
+                .help("New 4-bar loop slot on the beat at the playhead (L)")
+        } content: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(prep.loops.enumerated()), id: \.element.id) { n, loop in loopRow(n, loop) }
+                    if prep.loops.isEmpty {
+                        Text("No loop slots yet. Play to a spot and press L.")
+                            .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    }
+                }
+            }
+        }
+    }
+
+    private func loopRow(_ n: Int, _ loop: SavedLoop) -> some View {
+        let active = page.activeLoop == loop.id
+        return HStack(spacing: 6) {
+            Button { model.prepAudition(loop.id) } label: {
+                Text("\(n + 1)")
+                    .font(Theme.readoutSm)
+                    .frame(width: 22, height: 20)
+                    .foregroundStyle(active ? Theme.onAccent : Theme.ink)
+                    .background(active ? Theme.match : Theme.control)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            }
+            .buttonStyle(.plain)
+            .help(active ? "Stop looping" : "Loop it in the player")
+            Button { model.prepSetLoopIn(loop.id) } label: {
+                Text(Self.clock(loop.start)).font(Theme.readoutSm).foregroundStyle(Theme.ink)
+                    .frame(width: 54, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("Set the in-point to the beat at the playhead")
+            HStack(spacing: 1) {
+                ForEach(SavedLoop.barChoices, id: \.self) { bars in
+                    let on = abs(loop.bars - bars) < 0.01
+                    Button { model.prepSetLoopBars(loop.id, bars) } label: {
+                        Text(SavedLoop.barLabel(bars))
+                            .font(Theme.readoutSm)
+                            .frame(width: 24, height: 20)
+                            .foregroundStyle(on ? Theme.onAccent : Theme.inkMuted)
+                            .background(on ? Theme.ink : Theme.control)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            .help("Length in bars")
+            Spacer(minLength: 0)
+            Button { model.prepRemoveLoop(loop.id) } label: { Image(systemName: "xmark") }
+                .buttonStyle(SmallButtonStyle())
+        }
+    }
+
+    private var fxTools: some View {
+        section("Clip FX") {
+            Button("Reset") { model.prepResetFX() }
+                .buttonStyle(SmallButtonStyle())
+                .disabled(prep.fx.isEmpty)
+        } content: {
+            FXKnobs(fx: prep.fx, size: 38, spacing: 8) { model.prepSetFX($0, $1) }
+        }
+        .frame(width: 330)
+        .help("Set on the deck when this track is loaded. You hear them here while you set them.")
+    }
+
+    // Tempo and grid, tucked away: Spindle snaps cues and loops to the grid,
+    // counts bars with it and syncs with it. Only fix it if the click is off.
+
+    private var gridPopover: some View {
+        VStack(alignment: .leading, spacing: Theme.space3) {
+            Text("The beatgrid marks every beat. Cues and loops snap to it, bars are counted from it and Sync uses it. Turn on Click: if the click drifts away from the kick the tempo is off; if it's steadily early or late, nudge it.")
+                .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 4) {
                 Button("−") { model.prepEdit { $0.bpm -= 0.01 } }.help("−0.01 BPM")
-                Text(String(format: "%.2f", prep.bpm)).font(Theme.readout).foregroundStyle(Theme.ink)
-                    .frame(width: 64)
+                Text(String(format: "%.2f", prep.bpm)).font(Theme.readout).foregroundStyle(Theme.ink).frame(width: 64)
                 Button("+") { model.prepEdit { $0.bpm += 0.01 } }.help("+0.01 BPM")
                 Button("−1") { model.prepEdit { $0.bpm -= 1 } }
                 Button("+1") { model.prepEdit { $0.bpm += 1 } }
@@ -338,73 +452,20 @@ private struct PrepEditor: View {
                 Button("×2") { model.prepEdit { $0.bpm *= 2 } }
             }
             HStack(spacing: 4) {
-                Button { model.prepEdit { $0.gridOffset -= 0.005 } } label: { Image(systemName: "chevron.left") }
-                    .help("Nudge the grid earlier ([)")
-                Button { model.prepEdit { $0.gridOffset += 0.005 } } label: { Image(systemName: "chevron.right") }
-                    .help("Nudge the grid later (])")
-                Button("Downbeat here") { model.prepDownbeatHere() }
-                    .help("Bar 1 starts on the playhead (D)")
-                Button("Suggest again") { model.resuggest(url) }
-                    .help("Replaces the grid, cues and loops with a fresh suggestion. FX and mix-ready stay.")
+                Button { model.prepEdit { $0.gridOffset -= 0.005 } } label: { Label("Earlier", systemImage: "chevron.left") }
+                    .help("[")
+                Button { model.prepEdit { $0.gridOffset += 0.005 } } label: { Label("Later", systemImage: "chevron.right") }
+                    .help("]")
+                Button("Bar 1 here") { model.prepDownbeatHere() }
+                    .help("The bar starts on the playhead (D)")
+                Spacer()
+                Button("Detect again") { model.resuggest(url) }
+                    .help("Replaces the grid, cues and loop slots with a fresh suggestion. FX and mix-ready stay.")
             }
         }
         .buttonStyle(SmallButtonStyle())
-    }
-
-    private var loopTools: some View {
-        section("Loops") {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(prep.loops) { loop in
-                        HStack(spacing: Theme.space2) {
-                            Button { model.prepSeek(to: loop.start) } label: {
-                                HStack(spacing: Theme.space2) {
-                                    Text(Self.clock(loop.start)).foregroundStyle(Theme.ink)
-                                    Text("\(loop.beats) beats").foregroundStyle(Theme.inkMuted)
-                                }
-                                .font(Theme.readoutSm)
-                            }
-                            .buttonStyle(.plain)
-                            Spacer(minLength: 0)
-                            Button { model.prepEdit { $0.loops.removeAll { $0.id == loop.id } } } label: { Image(systemName: "xmark") }
-                                .buttonStyle(SmallButtonStyle())
-                        }
-                    }
-                }
-            }
-            .frame(maxHeight: 44)
-            HStack(spacing: 4) {
-                Picker("", selection: $newLoopBeats) {
-                    ForEach([4, 8, 16, 32], id: \.self) { Text("\($0)").tag($0) }
-                }
-                .labelsHidden()
-                .frame(width: 56)
-                Button("Add here") {
-                    let start = prep.snap(model.prepPosition)
-                    let beats = newLoopBeats
-                    model.prepEdit { $0.loops.append(SavedLoop(start: start, beats: beats)); $0.loops.sort { $0.start < $1.start } }
-                }
-                .buttonStyle(SmallButtonStyle())
-            }
-        }
-        .frame(width: 200)
-    }
-
-    private var fxTools: some View {
-        section("Clip FX · when loaded on a deck") {
-            HStack(spacing: Theme.space2) {
-                Text("Filter").font(Theme.caption).foregroundStyle(Theme.inkMuted).frame(width: 34, alignment: .leading)
-                Slider(value: Binding(get: { prep.fx.filter }, set: { v in model.prepEdit { $0.fx.filter = abs(v) < 0.03 ? 0 : v } }), in: -1...1)
-                Text(prep.fx.filter < -0.01 ? "LP" : prep.fx.filter > 0.01 ? "HP" : "Off")
-                    .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 26)
-            }
-            HStack(spacing: Theme.space2) {
-                Text("Echo").font(Theme.caption).foregroundStyle(Theme.inkMuted).frame(width: 34, alignment: .leading)
-                Slider(value: Binding(get: { prep.fx.echo }, set: { v in model.prepEdit { $0.fx.echo = v } }), in: 0...1)
-                Button("Reset") { model.prepEdit { $0.fx = ClipFX() } }.buttonStyle(SmallButtonStyle())
-            }
-        }
-        .frame(maxWidth: .infinity)
+        .padding(Theme.space3)
+        .frame(width: 360)
     }
 
     static func clock(_ s: Double) -> String {
@@ -491,8 +552,8 @@ private struct PrepOverview: View {
                 }
                 for cue in prep.cues {
                     let x = CGFloat(cue.time / duration) * size.width
-                    context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.role.color))
-                    context.fill(Path(CGRect(x: x - 1, y: 0, width: 8, height: 7)), with: .color(cue.role.color))
+                    context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.swatch))
+                    context.fill(Path(CGRect(x: x - 1, y: 0, width: 8, height: 7)), with: .color(cue.swatch))
                 }
             }
             // Played part, visible window and playhead move.
@@ -629,17 +690,73 @@ private struct PrepLane: View {
         }
 
         // Cues: a line and a flag with the role.
-        for cue in prep.cues {
+        for (n, cue) in prep.cues.enumerated() {
             let cx = x(cue.time)
             guard cx > -80, cx < size.width + 2 else { continue }
-            context.fill(Path(CGRect(x: cx - 1, y: laneTop, width: 2, height: laneHeight)), with: .color(cue.role.color))
-            let label = context.resolve(Text("\(cue.role.rawValue) \(cue.role.name)").font(Theme.label).foregroundStyle(Theme.onAccent))
+            context.fill(Path(CGRect(x: cx - 1, y: laneTop, width: 2, height: laneHeight)), with: .color(cue.swatch))
+            let label = context.resolve(Text("\(n + 1) \(cue.name)").font(Theme.label).foregroundStyle(Theme.onAccent))
             let s = label.measure(in: size)
-            context.fill(Path(CGRect(x: cx - 1, y: laneTop, width: s.width + 9, height: s.height + 4)), with: .color(cue.role.color))
+            context.fill(Path(CGRect(x: cx - 1, y: laneTop, width: s.width + 9, height: s.height + 4)), with: .color(cue.swatch))
             context.draw(label, at: CGPoint(x: cx + 4, y: laneTop + 2), anchor: .topLeading)
         }
 
         // Playhead.
         context.fill(Path(CGRect(x: size.width / 2 - 1, y: 0, width: 2, height: size.height)), with: .color(Theme.accent))
+    }
+}
+
+/// Name, colour and order of one cue.
+private struct CueEditor: View {
+    let cue: Cue
+    let number: Int
+    let onChange: (Cue) -> Void
+    let onMove: (Int) -> Void
+    let onDelete: () -> Void
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.space3) {
+            HStack {
+                Text("Cue \(number)").font(Theme.label).foregroundStyle(Theme.inkMuted)
+                Spacer()
+                Button { onMove(-1) } label: { Image(systemName: "chevron.left") }.help("Earlier slot")
+                Button { onMove(1) } label: { Image(systemName: "chevron.right") }.help("Later slot")
+            }
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { commitName() }
+                .onChange(of: name) { commitName() }
+            HStack(spacing: 6) {
+                ForEach(Cue.palette.indices, id: \.self) { i in
+                    Button { var c = cue; c.color = i; onChange(c) } label: {
+                        RoundedRectangle(cornerRadius: Theme.radiusSm)
+                            .fill(Cue.palette[i])
+                            .frame(width: 22, height: 22)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm)
+                                .stroke(cue.color == i ? Theme.ink : Color.clear, lineWidth: 2))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                ForEach(["IN", "DROP", "BRK", "BUILD", "VOX", "OUT"], id: \.self) { preset in
+                    Button(preset) { name = preset }
+                }
+                Spacer()
+            }
+            Button("Delete cue", role: .destructive) { onDelete() }
+        }
+        .buttonStyle(SmallButtonStyle())
+        .padding(Theme.space3)
+        .frame(width: 280)
+        .onAppear { name = cue.name }
+    }
+
+    private func commitName() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != cue.name else { return }
+        var c = cue
+        c.name = String(trimmed.prefix(12)).uppercased()
+        onChange(c)
     }
 }

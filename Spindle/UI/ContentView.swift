@@ -252,6 +252,10 @@ extension ContentView {
                 try? await Task.sleep(for: .seconds(1))
                 model.prepSetMetronome(true)
                 model.prepSetPlaying(true)
+                // Every FX on, in the player only (the track's prep is untouched).
+                if let e = model.engine?.preview {
+                    for kind in FXKind.allCases { e.setFX(kind, kind == .filter ? 0.3 : 0.6) }
+                }
                 prepStart = (model.prepPosition, Date())
             }
             try? await Task.sleep(for: .seconds(page == .sessions ? 2 : 4))
@@ -277,6 +281,7 @@ extension ContentView {
             spindleLog.notice("Snapshot: \(url.path)")
             if page == .prep {
                 model.prepSetPlaying(false)
+                model.syncPreviewFX()
                 model.prepSetMetronome(false)
             }
         }

@@ -119,6 +119,21 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private var clickLevel: Float = 0
     private let clickDecay: Float
 
+    /// Reverb, flanger, crusher and gate.
+    let effects: FXChain
+
+    /// Sets one FX amount (from the UI).
+    func setFX(_ kind: FXKind, _ value: Double) {
+        switch kind {
+        case .filter: filter = value
+        case .echo: echo = value
+        case .reverb: effects.reverb = value
+        case .flanger: effects.flanger = value
+        case .crush: effects.crush = value
+        case .gate: effects.gate = value
+        }
+    }
+
     private var svfL1: Float = 0, svfL2: Float = 0, svfR1: Float = 0, svfR2: Float = 0
     private static let delayFrames = 1 << 17
     private let delayL: UnsafeMutablePointer<Float>
@@ -158,6 +173,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         canSearch = definition.decodesPosition
         confirmBits = Int(0.3 * definition.bitRate)
         clickDecay = Float(exp(-1 / (0.025 * sampleRate)))
+        effects = FXChain(sampleRate: sampleRate)
         telemetry = .allocate(capacity: 1)
         telemetry.initialize(to: DeckTelemetry())
         scope = .allocate(capacity: Self.scopeFrames * 2)
@@ -280,6 +296,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         let feedback = Float(0.3 + 0.45 * echo)
         let loopEnd = loopStart + loopLength
         let looping = loopActive && loopLength > 0.05
+        let fxOn = effects.active
 
         for i in 0..<frames {
             let r = start + step * Double(i + 1)
@@ -317,6 +334,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 delaySamples = wantedDelay       // start at the right time, no sweep
             }
             delayWrite = (delayWrite + 1) & (Self.delayFrames - 1)
+            if fxOn {
+                effects.process(&outL, &outR, beatPhase: (playhead - gridOffset) / max(gridBeat, 0.05))
+            }
             currentGain += (gain - currentGain) * 0.002
             outL *= currentGain
             outR *= currentGain

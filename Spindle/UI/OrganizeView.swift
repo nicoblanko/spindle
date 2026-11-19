@@ -491,9 +491,15 @@ struct CrateList: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    LabelText("Library")
-                        .padding(.horizontal, Theme.space3)
-                        .padding(.vertical, Theme.space2)
+                    sectionHeader("Library", icon: "ellipsis") {
+                        Button("Choose music folder…") {
+                            Task {
+                                await library.chooseFolder()
+                                await model.analysis.analyze(library.allTracks.map(\.url))
+                                await model.prepareAll()
+                            }
+                        }
+                    }
                     plainRow(title: "All tracks", count: library.tracks.count,
                              selected: library.crate == nil && library.playlist == nil && library.tag == nil && library.smart == nil) { library.selectAll() }
                     ForEach(LibraryModel.SmartList.allCases) { smart in
@@ -538,26 +544,9 @@ struct CrateList: View {
                     .padding(.bottom, Theme.space2)
                     tree(parent: nil, depth: 0)
                     recentlyDeleted
-                    if store.nodes.isEmpty {
-                        Text("Make a set for each gig or mix. Add tracks from anywhere: drag them in, or right-click a track.")
-                            .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                            .padding(.horizontal, Theme.space3)
-                        Button("New set") { create(folder: false, in: nil) }
-                            .buttonStyle(FlatButtonStyle())
-                            .padding(Theme.space3)
-                    }
                     tagSection
                 }
             }
-            Button("Choose music folder…") {
-                Task {
-                    await library.chooseFolder()
-                    await model.analysis.analyze(library.allTracks.map(\.url))
-                    await model.prepareAll()
-                }
-            }
-            .buttonStyle(FlatButtonStyle())
-            .padding(Theme.space2)
         }
         .frame(maxHeight: .infinity)
         .background(Theme.panel)
@@ -697,11 +686,6 @@ struct CrateList: View {
             Button("Edit tags…") { editingTags = true }
         }
         ForEach(tagStore.manualTags) { tag in tagRow(tag) }
-        if tagStore.manualTags.isEmpty {
-            Text("Add tags in the Tags column: click a cell, type a name, press Enter.")
-                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                .padding(.horizontal, Theme.space3)
-        }
         sectionHeader("Tempo groups") {
             Button("Make tempo groups") { makeTempoGroups() }
             Button("New tempo group…") {
@@ -709,15 +693,6 @@ struct CrateList: View {
             }
         }
         ForEach(tagStore.tempoGroups) { tag in groupRow(tag) }
-        if tagStore.tempoGroups.isEmpty {
-            Text("Tempo groups collect tracks in a BPM range that mix with each other.")
-                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                .padding(.horizontal, Theme.space3)
-            Button("Make tempo groups") { makeTempoGroups() }
-                .buttonStyle(FlatButtonStyle())
-                .padding(Theme.space3)
-                .help("Splits your tracks into BPM ranges no wider than 6%, so tracks in a group mix with a small tempo change")
-        }
         EmptyView()
             .sheet(item: $editingGroup) { group in
                 TempoGroupEditor(group: group, library: library) { saved in
@@ -740,19 +715,19 @@ struct CrateList: View {
             }
     }
 
-    private func sectionHeader<M: View>(_ title: String, @ViewBuilder menu: () -> M) -> some View {
+    private func sectionHeader<M: View>(_ title: String, icon: String = "plus", @ViewBuilder menu: () -> M) -> some View {
         HStack {
             LabelText(title)
             Spacer()
             Menu { menu() } label: {
-                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
         }
         .padding(.horizontal, Theme.space3)
-        .padding(.top, Theme.space4)
+        .padding(.top, title == "Library" ? Theme.space2 : Theme.space4)
         .padding(.bottom, Theme.space2)
     }
 

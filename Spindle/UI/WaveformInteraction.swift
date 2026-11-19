@@ -62,6 +62,7 @@ struct WaveformInteraction: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
+            window?.makeFirstResponder(self)
             lastDrag = convert(event.locationInWindow, from: nil)
             moved = false
             if owner?.dragsAbsolutely == true, let p = lastDrag {

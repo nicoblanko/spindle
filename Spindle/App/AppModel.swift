@@ -23,10 +23,12 @@ final class DeckModel: Identifiable {
     var testTone = false
     var loopActive = false
     var loopBeats = 8
-    /// −1 … 1 (low-pass … high-pass).
-    var filter: Double = 0
-    /// 0 … 1.
-    var echo: Double = 0
+    /// The loop slot playing on this deck, if any.
+    var activeSlot: UUID?
+    /// The deck's FX amounts (filter −1 … 1, the rest 0 … 1).
+    var fx = ClipFX()
+    var filter: Double { get { fx.filter } set { fx.filter = newValue } }
+    var echo: Double { get { fx.echo } set { fx.echo = newValue } }
     // Laptop mode transport.
     var transportPlaying = false
     /// Tempo change in laptop mode: 0.05 = +5%.
@@ -287,9 +289,12 @@ final class AppModel {
             core.decks[deck.id].startIndex = deck.startIndex(for: definition) ?? 0
             core.decks[deck.id].toneFrequency = deck.id == 0 ? 440 : 660
             core.decks[deck.id].testTone = deck.testTone
-            core.decks[deck.id].filter = deck.filter
-            core.decks[deck.id].echo = deck.echo
-            if let url = deck.track?.url, let p = prep.prep(for: url) { core.decks[deck.id].beatSeconds = p.beatSeconds }
+            for kind in FXKind.allCases { core.decks[deck.id].setFX(kind, deck.fx[kind]) }
+            if let url = deck.track?.url, let p = prep.prep(for: url) {
+                core.decks[deck.id].beatSeconds = p.beatSeconds
+                core.decks[deck.id].gridOffset = p.gridOffset
+                core.decks[deck.id].gridBeat = p.beatSeconds
+            }
             core.simulators[deck.id].targetPitch = deck.simulatedPitch
             deck.transportPlaying = false
             core.decks[deck.id].transportPlaying = false

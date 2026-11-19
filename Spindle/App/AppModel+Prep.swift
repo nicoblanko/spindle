@@ -43,6 +43,7 @@ extension AppModel {
             }
             if let old { retire(old.samples) }
             syncPreviewGrid()
+            syncPreviewFX()
         }
     }
 
@@ -66,6 +67,7 @@ extension AppModel {
             }
         }
         syncPreviewGrid()
+        syncPreviewFX()
     }
 
     /// The metronome follows the grid as you edit it.
@@ -73,6 +75,7 @@ extension AppModel {
         guard let e = engine?.preview, let url = prepPage.selected, let p = prep.prep(for: url) else { return }
         e.gridOffset = p.gridOffset
         e.gridBeat = p.beatSeconds
+        e.beatSeconds = p.beatSeconds
     }
 
     func prepTogglePlay() { prepSetPlaying(!prepPage.playing) }
@@ -110,16 +113,89 @@ extension AppModel {
         prepSeek(to: p.gridOffset + (base + Double(beats)) * p.beatSeconds)
     }
 
-    func prepJump(_ role: CueRole) {
-        guard let url = prepPage.selected, let cue = prep.prep(for: url)?.cue(role) else { return }
-        prepSeek(to: cue.time)
+    private var prepGrid: TrackPrep? { prepPage.selected.flatMap { prep.prep(for: $0) } }
+
+    /// Jumps to cue slot `n` (0-based).
+    func prepJump(cue n: Int) {
+        guard let cues = prepGrid?.cues, cues.indices.contains(n) else { return }
+        prepSeek(to: cues[n].time)
     }
 
-    /// Sets the cue on the beat nearest the playhead.
-    func prepSetCue(_ role: CueRole) {
-        guard let url = prepPage.selected, let p = prep.prep(for: url) else { return }
+    /// Moves cue slot `n` to the beat nearest the playhead, or adds a cue.
+    func prepSetCue(slot n: Int) {
+        guard let p = prepGrid else { return }
         let t = p.snap(prepPosition)
-        prep.update(url) { $0.setCue(role, time: t) }
+        prepEdit { $0.setCue(slot: n, time: t) }
+    }
+
+    func prepAddCue() {
+        guard let p = prepGrid else { return }
+        let t = p.snap(prepPosition)
+        prepEdit { $0.addCue(at: t) }
+    }
+
+    /// A new loop slot starting on the beat at the playhead.
+    func prepAddLoop(bars: Double = 4) {
+        guard let p = prepGrid else { return }
+        let start = p.snap(prepPosition)
+        prepEdit { $0.loops.append(SavedLoop(start: start, beats: Int(bars * 4))) }
+    }
+
+    /// Moves a loop slot's in-point to the beat at the playhead.
+    func prepSetLoopIn(_ id: UUID) {
+        guard let p = prepGrid else { return }
+        let start = p.snap(prepPosition)
+        prepEdit { if let i = $0.loops.firstIndex(where: { $0.id == id }) { $0.loops[i].start = start } }
+        if prepPage.activeLoop == id { prepPage.activeLoop = nil; prepAudition(id) }
+    }
+
+    func prepSetLoopBars(_ id: UUID, _ bars: Double) {
+        prepEdit { if let i = $0.loops.firstIndex(where: { $0.id == id }) { $0.loops[i].beats = max(1, Int(bars * 4)) } }
+        if prepPage.activeLoop == id { prepPage.activeLoop = nil; prepAudition(id) }
+    }
+
+    func prepRemoveLoop(_ id: UUID) {
+        if prepPage.activeLoop == id { prepAudition(id) }
+        prepEdit { $0.loops.removeAll { $0.id == id } }
+    }
+
+    /// Loops a slot in the player (and starts it); again to let it run on.
+    func prepAudition(_ id: UUID) {
+        guard let e = engine?.preview, let p = prepGrid else { return }
+        if prepPage.activeLoop == id {
+            e.loopActive = false
+            prepPage.activeLoop = nil
+            return
+        }
+        guard let loop = p.loops.first(where: { $0.id == id }) else { return }
+        e.loopActive = false
+        e.loopStart = loop.start
+        e.loopLength = Double(loop.beats) * p.beatSeconds
+        prepSeek(to: loop.start)
+        e.loopActive = true
+        prepPage.activeLoop = id
+        if !prepPage.playing { prepSetPlaying(true) }
+    }
+
+    /// Sets a clip FX amount; the player plays it so you hear it.
+    func prepSetFX(_ kind: FXKind, _ value: Double) {
+        prepEdit { $0.fx[kind] = value }
+        engine?.preview.setFX(kind, value)
+    }
+
+    func prepResetFX() {
+        prepEdit { $0.fx = ClipFX() }
+        for kind in FXKind.allCases { engine?.preview.setFX(kind, 0) }
+    }
+
+    /// The player takes on the selected track's clip FX.
+    func syncPreviewFX() {
+        guard let e = engine?.preview else { return }
+        let fx = prepGrid?.fx ?? ClipFX()
+        for kind in FXKind.allCases { e.setFX(kind, fx[kind]) }
+        e.beatSeconds = prepGrid?.beatSeconds ?? 0.5
+        e.loopActive = false
+        prepPage.activeLoop = nil
     }
 
     /// Puts bar 1 of the grid on the beat at the playhead.

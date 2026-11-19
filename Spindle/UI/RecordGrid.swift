@@ -294,6 +294,9 @@ struct RecordGrid: View {
     }
 
     private func click(_ r: Record) {
+        // Clicking a row takes the keyboard back from the search field, so
+        // space plays instead of typing.
+        if NSApp.keyWindow?.firstResponder is NSText { NSApp.keyWindow?.makeFirstResponder(nil) }
         let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
             var s = selected
