@@ -1,0 +1,142 @@
+//
+//  WaveformLane.swift
+//  Spindle
+//
+//  A scrolling waveform with the playhead fixed in the centre. Drawn with
+//  Canvas for the prototype; Metal comes later.
+//
+
+import SwiftUI
+
+struct WaveformLane: View {
+    let deck: DeckModel
+    let telemetry: UnsafeMutablePointer<DeckTelemetry>?
+    /// Seconds visible across the lane.
+    var window: Double = 6
+
+    var body: some View {
+        TimelineView(.animation) { _ in
+            let playhead = telemetry?.pointee.playhead ?? 0
+            Canvas { context, size in
+                draw(context: context, size: size, playhead: playhead)
+            }
+        }
+        .background(Theme.panel)
+        .overlay {
+            if deck.track == nil {
+                Text(deck.loading ? "Loading…" : "Drop a track here or use Load…")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.inkFaint)
+            } else {
+                // In absolute mode the needle can sit outside the track: say so
+                // instead of looking broken.
+                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                    if let track = deck.track, let t = telemetry?.pointee {
+                        if t.playhead > track.duration {
+                            notice("Needle is past the end of this track (\(DeckPanel.clock(t.playhead))). Move it towards the start of the record.")
+                        } else if t.playhead < 0 {
+                            notice("Needle is before the start of this track.")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func notice(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.caption)
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, Theme.space2)
+            .padding(.vertical, Theme.space1)
+            .background(Theme.panelRaised)
+            .overlay(Rectangle().stroke(Theme.warn, lineWidth: 1))
+    }
+
+    private func draw(context: GraphicsContext, size: CGSize, playhead: Double) {
+        let mid = size.height / 2
+        let centreX = size.width / 2
+        let secondsPerPoint = window / Double(size.width)
+
+        // Beat-agnostic second ticks so movement is readable before a grid exists.
+        var ticks = Path()
+        let firstSecond = (playhead - window / 2).rounded(.down)
+        var s = firstSecond
+        while s <= playhead + window / 2 {
+            let x = centreX + CGFloat((s - playhead) / secondsPerPoint)
+            ticks.addRect(CGRect(x: x, y: size.height - 6, width: 1, height: 6))
+            s += 1
+        }
+        context.fill(ticks, with: .color(Theme.line))
+
+        if let track = deck.track, !track.peaks.isEmpty {
+            let peaks = track.peaks
+            let columnsPerPoint = secondsPerPoint * LoadedTrack.peaksPerSecond
+            let step: CGFloat = 2
+            var played = Path()
+            var ahead = Path()
+            var x: CGFloat = 0
+            while x < size.width {
+                let t0 = playhead + Double(x - centreX) * secondsPerPoint
+                let c0 = Int((t0 * LoadedTrack.peaksPerSecond).rounded(.down))
+                let c1 = max(c0 + 1, Int((Double(c0) + columnsPerPoint * Double(step)).rounded(.up)))
+                if c1 > 0 && c0 < peaks.count {
+                    var peak: Float = 0
+                    for c in max(c0, 0)..<min(c1, peaks.count) { peak = max(peak, peaks[c]) }
+                    let h = max(1, CGFloat(peak) * (mid - 6))
+                    let rect = CGRect(x: x, y: mid - h, width: step - 0.5, height: h * 2)
+                    if x < centreX { played.addRect(rect) } else { ahead.addRect(rect) }
+                }
+                x += step
+            }
+            context.fill(played, with: .color(deck.color.opacity(0.45)))
+            context.fill(ahead, with: .color(deck.color))
+        } else {
+            var centre = Path()
+            centre.addRect(CGRect(x: 0, y: mid, width: size.width, height: 1))
+            context.fill(centre, with: .color(Theme.line))
+        }
+
+        var head = Path()
+        head.addRect(CGRect(x: centreX - 1, y: 0, width: 2, height: size.height))
+        context.fill(head, with: .color(Theme.accent))
+    }
+}
+
+/// The whole track in one strip: played part dimmed, playhead in accent.
+struct TrackOverview: View {
+    let deck: DeckModel
+    let telemetry: UnsafeMutablePointer<DeckTelemetry>?
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
+            let playhead = telemetry?.pointee.playhead ?? 0
+            Canvas { context, size in
+                guard let track = deck.track, !track.peaks.isEmpty, track.duration > 0 else { return }
+                let peaks = track.peaks
+                let mid = size.height / 2
+                let columns = max(1, Int(size.width / 2))
+                let perColumn = Double(peaks.count) / Double(columns)
+                let playedX = CGFloat(playhead / track.duration) * size.width
+                var played = Path()
+                var ahead = Path()
+                for column in 0..<columns {
+                    let start = Int(Double(column) * perColumn)
+                    let end = min(peaks.count, max(start + 1, Int(Double(column + 1) * perColumn)))
+                    var peak: Float = 0
+                    for i in start..<end { peak = max(peak, peaks[i]) }
+                    let x = CGFloat(column) * 2
+                    let h = max(1, CGFloat(peak) * (mid - 2))
+                    let rect = CGRect(x: x, y: mid - h, width: 1.5, height: h * 2)
+                    if x < playedX { played.addRect(rect) } else { ahead.addRect(rect) }
+                }
+                context.fill(played, with: .color(deck.color.opacity(0.4)))
+                context.fill(ahead, with: .color(deck.color.opacity(0.85)))
+                var head = Path()
+                head.addRect(CGRect(x: min(max(playedX, 0), size.width) - 1, y: 0, width: 2, height: size.height))
+                context.fill(head, with: .color(Theme.accent))
+            }
+        }
+        .background(Theme.panel)
+    }
+}
