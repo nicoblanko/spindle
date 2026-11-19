@@ -167,9 +167,15 @@ final class SessionStore {
     // MARK: Export
 
     enum ExportFormat: String, CaseIterable, Identifiable {
-        case wav = "WAV", aac = "AAC (.m4a)"
+        case wav = "WAV", mp3 = "MP3 (320 kbps)", aac = "AAC (.m4a)"
         var id: String { rawValue }
-        var fileExtension: String { self == .wav ? "wav" : "m4a" }
+        var fileExtension: String {
+            switch self {
+            case .wav: "wav"
+            case .mp3: "mp3"
+            case .aac: "m4a"
+            }
+        }
     }
 
     func export(_ session: SessionInfo, as format: ExportFormat) {
@@ -184,6 +190,7 @@ final class SessionStore {
                     try? FileManager.default.removeItem(at: target)
                     switch format {
                     case .wav: try FileManager.default.copyItem(at: source, to: target)
+                    case .mp3: try MP3Encoder.encode(from: source, to: target)
                     case .aac: try Self.encodeAAC(from: source, to: target)
                     }
                 }.value

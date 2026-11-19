@@ -18,8 +18,8 @@ All four pages work:
   Clips that mix with a playing deck (key and tempo) are outlined in its
   colour. Cue pads, beat loops, filter and echo per deck.
 - **Sessions:** records the mix (the mixer's master send or Spindle's own
-  output) to 24-bit WAV with an automatic tracklist; export to WAV or AAC,
-  copy or save the tracklist.
+  output) to 24-bit WAV with an automatic tracklist; export to WAV,
+  MP3 (320 kbps, via LAME) or AAC, copy or save the tracklist.
 - **Timecode:** Traktor Scratch MK1 and MK2 vinyl through a class-compliant
   sound card (built and tested on an Allen & Heath Xone:24C with two
   Technics SL-1210 MK2). Absolute and relative modes, needle drops, and
@@ -27,8 +27,6 @@ All four pages work:
   (MK1 or MK2) when no sound card is connected.
 - **MIDI learn** for controllers such as the Akai MPK mini, with soft
   takeover for absolute knobs.
-
-Not yet: MP3 export (needs an encoder such as LAME).
 
 ## Building
 

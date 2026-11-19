@@ -1,0 +1,5 @@
+module LAME [system] {
+    header "lame/lame.h"
+    link "mp3lame"
+    export *
+}

@@ -127,6 +127,7 @@ struct SessionsView: View {
                     Spacer()
                     if !live {
                         Button("Export WAV…") { store.export(session, as: .wav) }
+                        Button("Export MP3…") { store.export(session, as: .mp3) }
                         Button("Export AAC…") { store.export(session, as: .aac) }
                         Button("Copy tracklist") { store.copyTracklist(session) }
                         Button("Save tracklist…") { store.saveTracklist(session) }
