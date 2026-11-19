@@ -202,8 +202,8 @@ extension AppModel {
     /// Applies a clip's FX and tempo to the deck it was loaded on.
     func applyClip(_ url: URL, to deck: DeckModel) {
         let p = prep.prep(for: url)
-        let clipFX = p?.fx ?? ClipFX()
-        for kind in FXKind.allCases { setFX(kind, clipFX[kind], deck: deck) }
+        // A new track starts dry; the deck's FX knobs are on the Mix page.
+        for kind in FXKind.allCases { setFX(kind, 0, deck: deck) }
         setLoop(false, deck: deck)
         let beat = p?.beatSeconds ?? analysis.analysis(for: url).map { 60 / $0.bpm } ?? 0.5
         engine?.decks[deck.id].beatSeconds = beat

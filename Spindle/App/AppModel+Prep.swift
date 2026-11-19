@@ -177,22 +177,10 @@ extension AppModel {
         if !prepPage.playing { prepSetPlaying(true) }
     }
 
-    /// Sets a clip FX amount; the player plays it so you hear it.
-    func prepSetFX(_ kind: FXKind, _ value: Double) {
-        prepEdit { $0.fx[kind] = value }
-        engine?.preview.setFX(kind, value)
-    }
-
-    func prepResetFX() {
-        prepEdit { $0.fx = ClipFX() }
-        for kind in FXKind.allCases { engine?.preview.setFX(kind, 0) }
-    }
-
-    /// The player takes on the selected track's clip FX.
+    /// The player plays dry, with no loop running.
     func syncPreviewFX() {
         guard let e = engine?.preview else { return }
-        let fx = prepGrid?.fx ?? ClipFX()
-        for kind in FXKind.allCases { e.setFX(kind, fx[kind]) }
+        for kind in FXKind.allCases { e.setFX(kind, 0) }
         e.beatSeconds = prepGrid?.beatSeconds ?? 0.5
         e.loopActive = false
         prepPage.activeLoop = nil

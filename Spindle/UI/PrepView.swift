@@ -266,8 +266,7 @@ private struct PrepEditor: View {
                 gridTools
                     .frame(width: 286)
                 loopTools
-                    .frame(width: 420)
-                fxTools
+                    .frame(width: 440)
             }
             .background(Theme.line)
             .frame(maxHeight: .infinity)
@@ -411,18 +410,6 @@ private struct PrepEditor: View {
             Button { model.prepRemoveLoop(loop.id) } label: { Image(systemName: "xmark") }
                 .buttonStyle(SmallButtonStyle())
         }
-    }
-
-    private var fxTools: some View {
-        section("Clip FX") {
-            Button("Reset") { model.prepResetFX() }
-                .buttonStyle(SmallButtonStyle())
-                .disabled(prep.fx.isEmpty)
-        } content: {
-            FXKnobs(fx: prep.fx, size: 38, spacing: 8) { model.prepSetFX($0, $1) }
-        }
-        .frame(width: 330)
-        .help("Set on the deck when this track is loaded. You hear them here while you set them.")
     }
 
     // The beatgrid: Spindle snaps cues and loops to it, counts bars with it
