@@ -63,6 +63,16 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
     /// Read by the audio thread each buffer; set from the UI.
     var routing: EngineRouting
 
+    /// What the session recorder hears.
+    let recordTap = RecordTap()
+    /// First input channel of the pair to record (the mixer's record/master
+    /// send), or −1 for Spindle's own output of both decks.
+    var recordInput = -1
+    private let mixL: UnsafeMutablePointer<Float>
+    private let mixR: UnsafeMutablePointer<Float>
+    /// Whether this device can supply a recording input pair.
+    var hasInputs: Bool { inputChannels >= 2 }
+
     init(device: AudioDevice, definition: TimecodeDefinition, simulate: Bool, routing: EngineRouting) {
         self.device = device
         self.sampleRate = device.sampleRate > 0 ? device.sampleRate : 48000
@@ -87,6 +97,10 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
         inputData = data
         silence = .allocate(capacity: Self.maxFrames)
         silence.initialize(repeating: 0, count: Self.maxFrames)
+        mixL = .allocate(capacity: Self.maxFrames)
+        mixL.initialize(repeating: 0, count: Self.maxFrames)
+        mixR = .allocate(capacity: Self.maxFrames)
+        mixR.initialize(repeating: 0, count: Self.maxFrames)
         simBuffers = (0..<4).map { _ in
             let b = UnsafeMutablePointer<Float>.allocate(capacity: Self.maxFrames)
             b.initialize(repeating: 0, count: Self.maxFrames)
@@ -100,6 +114,8 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
         inputList.unsafeMutablePointer.deallocate()
         silence.deallocate()
         simBuffers.forEach { $0.deallocate() }
+        mixL.deallocate()
+        mixR.deallocate()
     }
 
     func start() throws {
@@ -210,6 +226,27 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
                   let left = buffers[l].mData?.assumingMemoryBound(to: Float.self),
                   let right = buffers[l + 1].mData?.assumingMemoryBound(to: Float.self) else { continue }
             deck.render(left: left, right: right, frames: frames, mix: true)
+        }
+
+        // Recording: the mixer's record send if chosen, else both decks' output.
+        let source = recordInput
+        if source >= 0 && source + 1 < inputChannels {
+            recordTap.push(left: inputData[source], right: inputData[source + 1], frames: frames)
+        } else {
+            mixL.update(repeating: 0, count: frames)
+            mixR.update(repeating: 0, count: frames)
+            var pairs = [0]
+            if separate { pairs = [routing.output(0), routing.output(1)] }
+            if pairs.count == 2 && pairs[0] == pairs[1] { pairs.removeLast() }
+            for l in pairs where l + 1 < buffers.count {
+                guard let a = buffers[l].mData?.assumingMemoryBound(to: Float.self),
+                      let b = buffers[l + 1].mData?.assumingMemoryBound(to: Float.self) else { continue }
+                for i in 0..<frames {
+                    mixL[i] += a[i]
+                    mixR[i] += b[i]
+                }
+            }
+            recordTap.push(left: mixL, right: mixR, frames: frames)
         }
         return noErr
     }

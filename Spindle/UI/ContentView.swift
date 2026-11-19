@@ -2,10 +2,11 @@
 //  ContentView.swift
 //  Spindle
 //
-//  Build step 1: the timecode prototype. Device bar, track list from the
-//  music folder, one box per deck (waveforms and readouts), and the page bar.
+//  The window: device bar on top, the current page, and the page bar at the
+//  bottom like DaVinci Resolve (Organize, Prep, Mix, Sessions).
 //
 
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import OSLog
@@ -29,26 +30,26 @@ struct ContentView: View {
             case .organize:
                 OrganizeView(library: model.library, analysis: model.analysis, model: model)
                     .frame(maxHeight: .infinity)
-            default:
-                LibraryPanel(library: model.library, model: model)
-                    .frame(minHeight: 180, idealHeight: 240, maxHeight: 280)
-                Rectangle().fill(Theme.line).frame(height: 1)
-                HStack(spacing: 1) {
-                    ForEach(model.decks) { deck in
-                        DeckPanel(deck: deck, model: model)
-                    }
-                }
-                .frame(maxHeight: .infinity)
-                .background(Theme.line)
+            case .prep:
+                PrepView(library: model.library, model: model, page: model.prepPage)
+                    .frame(maxHeight: .infinity)
+            case .mix:
+                MixView(model: model, library: model.library)
+                    .frame(maxHeight: .infinity)
+            case .sessions:
+                SessionsView(model: model, store: model.sessions)
+                    .frame(maxHeight: .infinity)
             }
             Rectangle().fill(Theme.line).frame(height: 1)
             PageBar(page: $model.page)
         }
         .background(Theme.bg)
         .preferredColorScheme(.dark)
-        .frame(minWidth: 1100, minHeight: 820)
+        .frame(minWidth: 1180, minHeight: 820)
+        .sheet(isPresented: $model.showingMIDI) { MIDIMappingView(midi: model.midi) }
         .task { await model.start() }
         .task { await model.refreshLibrary() }
+        .task { await snapshotIfRequested() }
         .fileImporter(
             isPresented: $model.showingImporter,
             allowedContentTypes: [.audio]
@@ -63,14 +64,61 @@ struct ContentView: View {
     }
 }
 
+extension ContentView {
+    /// Self-test: with SPINDLE_SNAPSHOT=<folder> set, renders every page to a
+    /// PNG (with a track loaded and a simulated record playing), then puts
+    /// the page back. Used to check layouts without clicking through.
+    func snapshotIfRequested() async {
+        guard let dir = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT"] else { return }
+        let original = model.page
+        try? await Task.sleep(for: .seconds(4))
+        let tracks = model.library.tracks
+        if tracks.count > 1 {
+            await model.load(url: tracks[0].url, into: model.decks[0])
+            await model.load(url: tracks[1].url, into: model.decks[1])
+            model.setSimulatedPitch(1, deck: model.decks[0])
+            model.selectForPrep(tracks[0].url)
+            model.highlightedClip = tracks[2 % tracks.count].url
+        }
+        let recordTest = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT_RECORD"] != nil
+        if recordTest { model.toggleRecording() }
+        let started = Date()
+        for page in AppModel.Page.allCases {
+            if page == .sessions && recordTest {
+                // Long enough for deck A to be logged (20 s of play).
+                let wait = 24 - Date().timeIntervalSince(started)
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                model.toggleRecording()
+            }
+            model.page = page
+            try? await Task.sleep(for: .seconds(page == .sessions ? 2 : 4))
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+                  let view = window.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("\(page.rawValue).png")
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            spindleLog.notice("Snapshot: \(url.path)")
+        }
+        model.setSimulatedPitch(0, deck: model.decks[0])
+        model.page = original
+    }
+}
+
 private struct TopBar: View {
     @Bindable var model: AppModel
 
     var body: some View {
         HStack(spacing: Theme.space3) {
             Text("Spindle").font(Theme.title).foregroundStyle(Theme.ink)
-            Text("Timecode prototype").font(Theme.caption).foregroundStyle(Theme.inkMuted)
+            RecordButton(model: model)
+            if model.sessions.recording {
+                Text(SessionStore.clock(model.sessions.elapsed)).font(Theme.readoutSm).foregroundStyle(Theme.ink)
+            }
             Spacer()
+            Button("MIDI") { model.showingMIDI = true }
+                .buttonStyle(FlatButtonStyle())
+                .help("Map an Akai MPK mini or other MIDI controller (MIDI learn)")
 
             Picker("Device", selection: $model.selectedDeviceID) {
                 ForEach(model.devices) { device in

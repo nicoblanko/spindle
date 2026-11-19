@@ -80,6 +80,29 @@ nonisolated final class DeckEngine: @unchecked Sendable {
 
     var toneFrequency: Double = 440
 
+    // MARK: Cues, loops, FX (set from the UI)
+
+    /// Jump the track to this time (seconds); NaN = none. The record keeps
+    /// control: the track's offset to the record moves with the jump.
+    var jumpRequest: Double = .nan
+    var loopActive = false
+    var loopStart: Double = 0
+    var loopLength: Double = 0
+    /// −1 … 1: low-pass below 0, high-pass above.
+    var filter: Double = 0
+    /// 0 … 1: echo wet level and feedback.
+    var echo: Double = 0
+    /// Length of one beat of the loaded track at its own tempo, for the echo.
+    var beatSeconds: Double = 0.5
+
+    private var svfL1: Float = 0, svfL2: Float = 0, svfR1: Float = 0, svfR2: Float = 0
+    private static let delayFrames = 1 << 17
+    private let delayL: UnsafeMutablePointer<Float>
+    private let delayR: UnsafeMutablePointer<Float>
+    private var delayWrite = 0
+    private var delaySamples: Double = 0
+    private var echoWet: Float = 0
+
     // MARK: Needle up
 
     /// Set from the UI to stop a deck that is playing on with the needle up.
@@ -114,11 +137,17 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         telemetry.initialize(to: DeckTelemetry())
         scope = .allocate(capacity: Self.scopeFrames * 2)
         scope.initialize(repeating: 0, count: Self.scopeFrames * 2)
+        delayL = .allocate(capacity: Self.delayFrames)
+        delayL.initialize(repeating: 0, count: Self.delayFrames)
+        delayR = .allocate(capacity: Self.delayFrames)
+        delayR.initialize(repeating: 0, count: Self.delayFrames)
     }
 
     deinit {
         telemetry.deallocate()
         scope.deallocate()
+        delayL.deallocate()
+        delayR.deallocate()
     }
 
     /// Swaps in a new track and returns the previous one, which the caller frees
@@ -174,6 +203,12 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             playhead = 0
             anchorPending = true
         }
+        if !jumpRequest.isNaN {
+            let delta = jumpRequest - playhead
+            playhead = jumpRequest
+            trackOffset -= delta
+            jumpRequest = .nan
+        }
         updateCoasting(decoder: decoder, frames: frames)
         if coasting {
             target = coastPitch
@@ -198,6 +233,21 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         let step = (target - start) / Double(max(frames, 1))
         let samples = track.load(ordering: .acquiring)?.assumingMemoryBound(to: TrackSamples.self)
 
+        // Filter: a state-variable filter, cutoff swept exponentially.
+        let filterOn = abs(filter) > 0.01
+        let highPass = filter > 0
+        let cutoff = highPass ? 20 * pow(200.0, filter) : 20_000 * pow(0.01, -filter)
+        let g = Float(tan(Double.pi * min(cutoff, sampleRate * 0.45) / sampleRate))
+        let k: Float = 1.1
+        let a1 = 1 / (1 + g * (g + k)), a2 = g * a1, a3 = g * a2
+        // Echo: three-quarter beat at the playing speed.
+        let speed = max(abs(target), 0.25)
+        let wantedDelay = min(0.75 * beatSeconds / speed * sampleRate, Double(Self.delayFrames - 2))
+        let echoTarget = Float(echo)
+        let feedback = Float(0.3 + 0.45 * echo)
+        let loopEnd = loopStart + loopLength
+        let looping = loopActive && loopLength > 0.05
+
         for i in 0..<frames {
             let r = start + step * Double(i + 1)
             var outL: Float = 0, outR: Float = 0
@@ -207,6 +257,33 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 outL = Self.hermite(t.left, t.frames, x)
                 outR = Self.hermite(t.right, t.frames, x)
             }
+            if filterOn {
+                func run(_ v0: Float, _ c1: inout Float, _ c2: inout Float) -> Float {
+                    let v3 = v0 - c2
+                    let v1 = a1 * c1 + a2 * v3
+                    let v2 = c2 + a2 * c1 + a3 * v3
+                    c1 = 2 * v1 - c1
+                    c2 = 2 * v2 - c2
+                    return highPass ? v0 - k * v1 - v2 : v2
+                }
+                outL = run(outL, &svfL1, &svfL2)
+                outR = run(outR, &svfR1, &svfR2)
+            }
+            echoWet += (echoTarget - echoWet) * 0.0005
+            delaySamples += (wantedDelay - delaySamples) * 0.0002
+            if echoWet > 0.0005 || echoTarget > 0 {
+                let read = (delayWrite - Int(delaySamples) + Self.delayFrames) & (Self.delayFrames - 1)
+                let dl = delayL[read], dr = delayR[read]
+                delayL[delayWrite] = outL + dl * feedback
+                delayR[delayWrite] = outR + dr * feedback
+                outL += dl * echoWet
+                outR += dr * echoWet
+            } else {
+                delayL[delayWrite] = 0
+                delayR[delayWrite] = 0
+                delaySamples = wantedDelay       // start at the right time, no sweep
+            }
+            delayWrite = (delayWrite + 1) & (Self.delayFrames - 1)
             if testTone {
                 let tone = Float(sin(tonePhase)) * 0.1
                 tonePhase += 2 * .pi * toneFrequency / sampleRate
@@ -222,6 +299,17 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 right[i] = outR
             }
             playhead += r / sampleRate
+            if looping {
+                // Wrap inside the loop; the record keeps its place, so the
+                // track's offset to it moves by one loop length.
+                if r > 0 && playhead >= loopEnd {
+                    playhead -= loopLength
+                    trackOffset += loopLength
+                } else if r < 0 && playhead < loopStart && playhead > loopStart - 0.25 {
+                    playhead += loopLength
+                    trackOffset -= loopLength
+                }
+            }
         }
         rate = target
         wasLocked = decoder.hasPosition

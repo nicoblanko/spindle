@@ -6,14 +6,29 @@ Resolve (Organize, Prep, Mix, Sessions).
 
 ## Status
 
-- **Timecode:** reads Traktor Scratch MK1 and MK2 vinyl through a
-  class-compliant sound card (built and tested on an Allen & Heath Xone:24C
-  with two Technics SL-1210 MK2). Absolute and relative modes, needle drops,
-  and playing on when the needle leaves the record.
-- **Simulated turntables** when no sound card is connected, generating MK1 or
-  MK2 timecode.
-- **Organize:** library from a folder, analysis of BPM, key (Camelot),
-  energy, intro and outro type; compatibility filtering and a key × energy map.
+All four pages work:
+
+- **Organize:** library from a folder (subfolders are crates), analysis of
+  BPM, key (Camelot), energy, intro and outro type; compatibility filtering
+  and a key × energy map.
+- **Prep:** suggested beatgrid (tempo and downbeat), cues 1 IN, 2 DROP,
+  3 BRK, 4 OUT and loops, all editable on a zoomable waveform; clip FX
+  (filter, echo) and a mix-ready flag.
+- **Mix:** clip grid with one column per crate above the two timecode decks.
+  Clips that mix with a playing deck (key and tempo) are outlined in its
+  colour. Cue pads, beat loops, filter and echo per deck.
+- **Sessions:** records the mix (the mixer's master send or Spindle's own
+  output) to 24-bit WAV with an automatic tracklist; export to WAV or AAC,
+  copy or save the tracklist.
+- **Timecode:** Traktor Scratch MK1 and MK2 vinyl through a class-compliant
+  sound card (built and tested on an Allen & Heath Xone:24C with two
+  Technics SL-1210 MK2). Absolute and relative modes, needle drops, and
+  playing on when the needle leaves the record. Simulated turntables
+  (MK1 or MK2) when no sound card is connected.
+- **MIDI learn** for controllers such as the Akai MPK mini, with soft
+  takeover for absolute knobs.
+
+Not yet: MP3 export (needs an encoder such as LAME).
 
 ## Building
 

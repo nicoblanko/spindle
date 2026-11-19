@@ -12,6 +12,8 @@ import OSLog
 struct DeckPanel: View {
     @Bindable var deck: DeckModel
     let model: AppModel
+    /// Mix page: smaller waveform and a one-line readout.
+    var compact = false
 
     private var engine: DeckEngine? { model.engine?.decks[deck.id] }
 
@@ -23,14 +25,22 @@ struct DeckPanel: View {
             waveforms
             Rectangle().fill(Theme.line).frame(height: 1)
             TimelineView(.animation) { _ in
-                live(engine?.telemetry.pointee ?? DeckTelemetry())
+                if compact {
+                    liveCompact(engine?.telemetry.pointee ?? DeckTelemetry())
+                } else {
+                    live(engine?.telemetry.pointee ?? DeckTelemetry())
+                }
             }
-            .padding(Theme.space3)
+            .padding(compact ? Theme.space2 : Theme.space3)
             Rectangle().fill(Theme.line).frame(height: 1)
             controls
-            if model.engine?.simulate == true {
+            if model.engine?.simulate == true && !compact {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 simulator.padding(Theme.space3)
+            }
+            if model.engine?.simulate == true && compact {
+                Rectangle().fill(Theme.line).frame(height: 1)
+                simulatorCompact.padding(.horizontal, Theme.space3).padding(.vertical, Theme.space1)
             }
             Spacer(minLength: 0)
         }
@@ -71,8 +81,8 @@ struct DeckPanel: View {
         VStack(spacing: 1) {
             TrackOverview(deck: deck, telemetry: engine?.telemetry)
                 .frame(height: 32)
-            WaveformLane(deck: deck, telemetry: engine?.telemetry)
-                .frame(height: 150)
+            WaveformLane(deck: deck, telemetry: engine?.telemetry, prep: deck.track.flatMap { model.prep.prep(for: $0.url) })
+                .frame(height: compact ? 96 : 150)
         }
         .background(Theme.line)
     }
@@ -186,6 +196,43 @@ struct DeckPanel: View {
         .frame(height: 140, alignment: .top)
     }
 
+    /// One fixed-width line: time, remaining, pitch, mode, lock.
+    private func liveCompact(_ t: DeckTelemetry) -> some View {
+        HStack(spacing: Theme.space3) {
+            Text(Self.clock(t.playhead)).font(Theme.readout).foregroundStyle(Theme.ink).frame(width: 92, alignment: .leading)
+            Text(deck.track.map { "−" + Self.clock(max(0, $0.duration - t.playhead)) } ?? " ")
+                .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 70, alignment: .leading)
+            Text(Self.pitch(t.pitch)).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 64, alignment: .leading)
+            Text(abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀")).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 14)
+            Text(t.absolute ? "ABS" : "REL").font(Theme.readoutSm).foregroundStyle(t.absolute ? Theme.ink : Theme.inkMuted).frame(width: 30)
+            Spacer(minLength: 0)
+            if t.coasting {
+                Button("■ Stop deck") { model.stopCoasting(deck: deck) }
+                    .font(Theme.readoutSm).buttonStyle(.plain).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 6).background(Theme.control)
+            }
+            lockBadge(t)
+        }
+        .frame(height: 22)
+    }
+
+    private var simulatorCompact: some View {
+        HStack(spacing: Theme.space2) {
+            LabelText("Sim", color: Theme.inkFaint)
+            Button("◀") { model.setSimulatedPitch(-1, deck: deck) }
+            Button("■") { model.setSimulatedPitch(0, deck: deck) }
+            Button("▶") { model.setSimulatedPitch(1, deck: deck) }
+            Button("+8%") { model.setSimulatedPitch(1.08, deck: deck) }
+            Button(deck.simulatorLifted ? "Drop" : "Lift") { model.setSimulatorLifted(!deck.simulatorLifted, deck: deck) }
+            Button("To start") { model.seekSimulator(seconds: 1, deck: deck) }
+            Spacer(minLength: 0)
+            Text(Self.pitch(deck.simulatedPitch)).font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
+        }
+        .buttonStyle(.plain)
+        .font(Theme.caption)
+        .foregroundStyle(Theme.inkMuted)
+    }
+
     private func lockBadge(_ t: DeckTelemetry) -> some View {
         let noSignal = t.signal < 0.002 && !t.lockHeld
         let text = t.coasting ? "Needle up" : noSignal ? "No signal" : (t.lockHeld ? "Locked" : "Searching")
@@ -235,10 +282,8 @@ struct DeckPanel: View {
 
     static func clock(_ seconds: Double) -> String {
         let negative = seconds < 0
-        let s = abs(seconds)
-        let minutes = Int(s / 60)
-        let rest = s - Double(minutes * 60)
-        return (negative ? "-" : "") + String(format: "%02d:%04.1f", minutes, rest)
+        let tenths = Int((abs(seconds) * 10).rounded())
+        return (negative ? "-" : "") + String(format: "%02d:%02d.%d", tenths / 600, tenths / 10 % 60, tenths % 10)
     }
 
     static func pitch(_ p: Double) -> String {

@@ -11,6 +11,8 @@ import SwiftUI
 struct WaveformLane: View {
     let deck: DeckModel
     let telemetry: UnsafeMutablePointer<DeckTelemetry>?
+    /// Beatgrid and cues from Prep, if the track has been prepped.
+    var prep: TrackPrep? = nil
     /// Seconds visible across the lane.
     var window: Double = 6
 
@@ -58,7 +60,21 @@ struct WaveformLane: View {
         let centreX = size.width / 2
         let secondsPerPoint = window / Double(size.width)
 
-        // Beat-agnostic second ticks so movement is readable before a grid exists.
+        // Beatgrid from Prep: bar lines, with 8-bar phrases stronger.
+        if let prep {
+            var n = ((playhead - window / 2 - prep.gridOffset) / prep.beatSeconds).rounded(.down)
+            var grid = Path(), bars = Path()
+            while prep.gridOffset + n * prep.beatSeconds <= playhead + window / 2 {
+                let t = prep.gridOffset + n * prep.beatSeconds
+                let x = centreX + CGFloat((t - playhead) / secondsPerPoint)
+                if Int(n) % 4 == 0 { bars.addRect(CGRect(x: x, y: 0, width: Int(n) % 32 == 0 ? 2 : 1, height: size.height)) }
+                else { grid.addRect(CGRect(x: x, y: size.height - 10, width: 1, height: 10)) }
+                n += 1
+            }
+            context.fill(grid, with: .color(Theme.line))
+            context.fill(bars, with: .color(Theme.line.opacity(0.9)))
+        }
+        // Second ticks so movement is readable before a grid exists.
         var ticks = Path()
         let firstSecond = (playhead - window / 2).rounded(.down)
         var s = firstSecond
@@ -95,6 +111,16 @@ struct WaveformLane: View {
             var centre = Path()
             centre.addRect(CGRect(x: 0, y: mid, width: size.width, height: 1))
             context.fill(centre, with: .color(Theme.line))
+        }
+
+        if let prep {
+            for cue in prep.cues {
+                let x = centreX + CGFloat((cue.time - playhead) / secondsPerPoint)
+                guard x > -40 && x < size.width else { continue }
+                context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.role.color))
+                context.fill(Path(CGRect(x: x, y: 0, width: 14, height: 12)), with: .color(cue.role.color))
+                context.draw(Text("\(cue.role.rawValue)").font(Theme.label).foregroundStyle(Theme.onAccent), at: CGPoint(x: x + 7, y: 6))
+            }
         }
 
         var head = Path()

@@ -21,6 +21,16 @@ final class DeckModel: Identifiable {
     var simulatorLifted = false
     var absoluteMode = true
     var testTone = false
+    var loopActive = false
+    var loopBeats = 8
+    /// −1 … 1 (low-pass … high-pass).
+    var filter: Double = 0
+    /// 0 … 1.
+    var echo: Double = 0
+    /// Updated a few times a second from the engine: playing forward at speed.
+    var playing = false
+    /// Current speed (1 = the track's own tempo).
+    var pitch: Double = 0
 
     init(id: Int) { self.id = id }
 
@@ -91,6 +101,14 @@ final class AppModel {
     let decks = [DeckModel(id: 0), DeckModel(id: 1)]
     let library = LibraryModel()
     let analysis = AnalysisStore()
+    let prep = PrepStore()
+    let prepPage = PrepPageModel()
+    let sessions = SessionStore()
+    let midi = MIDIController()
+    /// Background cue suggestion for the library.
+    var preparing = 0
+    /// The clip selected in the Mix grid (MIDI "load highlighted clip").
+    var highlightedClip: URL?
     /// Remembered between launches.
     var page: Page = Page(rawValue: UserDefaults.standard.string(forKey: "page") ?? "") ?? .mix {
         didSet { UserDefaults.standard.set(page.rawValue, forKey: "page") }
@@ -99,19 +117,20 @@ final class AppModel {
     enum Page: String, CaseIterable, Identifiable {
         case organize = "Organize", prep = "Prep", mix = "Mix", sessions = "Sessions"
         var id: String { rawValue }
-        /// Pages built so far (build order in CLAUDE.md).
-        var available: Bool { self == .organize || self == .mix }
+        var available: Bool { true }
     }
 
     /// Scans the music folder, then analyses anything new.
     func refreshLibrary() async {
         await library.rescan()
         await analysis.analyze(library.tracks.map(\.url))
+        await prepareAll()
     }
     /// The deck whose Load… button opened the file picker. There is one picker
     /// for the window: SwiftUI only runs one `.fileImporter` among sibling views.
     var importTarget: DeckModel?
     var showingImporter = false
+    var showingMIDI = false
 
     func chooseFile(for deck: DeckModel) {
         spindleLog.notice("Load… clicked on deck \(deck.label)")
@@ -124,6 +143,7 @@ final class AppModel {
     init() {
         refreshDevices()
         simulate = !(selectedDevice?.isXone ?? false)
+        setupMIDI()
     }
 
     func refreshDevices() {
@@ -182,12 +202,17 @@ final class AppModel {
         engine = core
         running = true
         rememberLocks()
+        monitorDecks()
+        core.recordInput = recordInputDefault(for: core)
         for deck in decks {
             core.decks[deck.id].absoluteMode = deck.absoluteMode
             if let config = deck.preferredConfig(for: definition) { core.decks[deck.id].prefer(config: config) }
             core.decks[deck.id].startIndex = deck.startIndex(for: definition) ?? 0
             core.decks[deck.id].toneFrequency = deck.id == 0 ? 440 : 660
             core.decks[deck.id].testTone = deck.testTone
+            core.decks[deck.id].filter = deck.filter
+            core.decks[deck.id].echo = deck.echo
+            if let url = deck.track?.url, let p = prep.prep(for: url) { core.decks[deck.id].beatSeconds = p.beatSeconds }
             core.simulators[deck.id].targetPitch = deck.simulatedPitch
             if let track = deck.track {
                 if track.samples.pointee.sampleRate == core.sampleRate {
@@ -220,6 +245,7 @@ final class AppModel {
             deck.track = track
             _ = engine?.decks[deck.id].exchangeTrack(track.samples)
             if let old { retire(old.samples) }
+            applyClip(track.url, to: deck)
             spindleLog.notice("Deck \(deck.label) loaded \(track.title), \(track.duration) s, engine \(self.engine == nil ? "off" : "on")")
         } catch {
             spindleLog.error("Deck \(deck.label) failed: \(error.localizedDescription)")
