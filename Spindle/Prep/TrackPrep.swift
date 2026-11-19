@@ -169,6 +169,8 @@ nonisolated struct TrackPrep: Codable, Sendable, Equatable {
     var loops: [SavedLoop] = []
     var fx = ClipFX()
     var mixReady = false
+    /// The detector wasn't sure the grid is on the kick (not the off-beat).
+    var gridUnsure: Bool?
 
     var beatSeconds: Double { 60 / bpm }
 
@@ -248,7 +250,8 @@ final class PrepStore {
             let snapshot = self.preps
             await Task.detached(priority: .utility) {
                 if let data = try? JSONEncoder().encode(snapshot) {
-                    try? data.write(to: Self.fileURL, options: .atomic)
+                    // Backed up like the playlists, at most every 10 minutes.
+                    SafeWrite.write(data, to: Self.fileURL, every: 600)
                 }
             }.value
         }

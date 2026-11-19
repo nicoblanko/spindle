@@ -198,6 +198,7 @@ final class AppModel {
         await library.rescan()
         await analysis.analyze(library.allTracks.map(\.url))
         await prepareAll()
+        await regridIfNeeded()
     }
     /// The deck whose Load… button opened the file picker. There is one picker
     /// for the window: SwiftUI only runs one `.fileImporter` among sibling views.

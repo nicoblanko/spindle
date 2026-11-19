@@ -69,8 +69,17 @@ extension ContentView {
     /// PNG (with a track loaded and a simulated record playing), then puts
     /// the page back. Used to check layouts without clicking through.
     func snapshotIfRequested() async {
+        if let out = ProcessInfo.processInfo.environment["SPINDLE_GRIDCHECK"] {
+            try? await Task.sleep(for: .seconds(3))
+            let items = model.library.allTracks.compactMap { t in model.prep.prep(for: t.url).map { (t.url, $0) } }
+            let report = await GridCheck.run(items)
+            try? report.write(toFile: out, atomically: true, encoding: .utf8)
+            spindleLog.notice("Grid check written")
+            return
+        }
         if ProcessInfo.processInfo.environment["SPINDLE_SCRUBTEST"] != nil {
             spindleLog.notice("\(DeckEngine.scrubTest())")
+            spindleLog.notice("\(DeckEngine.loopTest())")
             return
         }
         if ProcessInfo.processInfo.environment["SPINDLE_PREPLAG"] != nil {

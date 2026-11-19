@@ -417,6 +417,11 @@ private struct PrepEditor: View {
 
     private var gridTools: some View {
         section("Beatgrid") {
+            if prep.gridUnsure == true {
+                Text("Check with Click")
+                    .font(Theme.caption).foregroundStyle(Theme.warn)
+                    .help("The bassline hits as hard as the kick, so the grid may sit on the off-beat. Turn on Click: if it ticks between the kicks, play to a kick and press D.")
+            }
             Button("Detect again") { model.resuggest(url) }
                 .buttonStyle(SmallButtonStyle())
                 .help("Replaces the grid, cues and loop slots with a fresh suggestion. FX and mix-ready stay.")

@@ -28,16 +28,22 @@ nonisolated enum SafeWrite {
     /// Copies the current file to Backups (when it differs from the new
     /// data), writes the new data, and trims old backups. Call on a serial
     /// queue.
-    static func write(_ data: Data, to url: URL) {
-        if let old = try? Data(contentsOf: url), old != data, !old.isEmpty {
+    /// `every`: back up at most this often (seconds), for files saved
+    /// many times a minute while you edit.
+    static func write(_ data: Data, to url: URL, every: TimeInterval = 0) {
+        let name = url.deletingPathExtension().lastPathComponent
+        let recent = every > 0 && (lastBackup[name].map { Date().timeIntervalSince($0) < every } ?? false)
+        if !recent, let old = try? Data(contentsOf: url), old != data, !old.isEmpty {
+            lastBackup[name] = Date()
             let stamp = stampFormatter.string(from: Date())
-            let name = url.deletingPathExtension().lastPathComponent
             let backup = backupFolder.appendingPathComponent("\(name) \(stamp).json")
             try? old.write(to: backup, options: .atomic)
             trim(prefix: name + " ")
         }
         try? data.write(to: url, options: .atomic)
     }
+
+    nonisolated(unsafe) private static var lastBackup: [String: Date] = [:]
 
     private static func trim(prefix: String) {
         let fm = FileManager.default

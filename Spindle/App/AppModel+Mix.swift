@@ -146,6 +146,72 @@ extension AppModel {
         preparing = 0
     }
 
+    /// Grid detection version 2 puts the grid on the kick (v1 could land
+    /// on hi-hats or the off-beat). Once, re-detect every track's grid and
+    /// move its cues and loop slots along, so they land on the kick too.
+    static let gridVersion = 4
+
+    func regridIfNeeded() async {
+        guard UserDefaults.standard.integer(forKey: "gridVersion") < Self.gridVersion else { return }
+        let todo = library.allTracks.map(\.url).filter { prep.prep(for: $0) != nil }
+        spindleLog.notice("Re-grid: checking \(todo.count) tracks")
+        // Keep a copy of every grid, cue and loop slot as they were.
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Spindle/prep.json")
+        let copy = SafeWrite.backupFolder.appendingPathComponent("prep before re-grid v\(Self.gridVersion).json")
+        try? FileManager.default.copyItem(at: file, to: copy)
+        let bpms = Dictionary(uniqueKeysWithValues: todo.map { ($0, analysis.analysis(for: $0)?.bpm) })
+        var changed = 0
+        await withTaskGroup(of: (URL, TrackPrep?).self) { group in
+            var iterator = todo.makeIterator()
+            func addNext() {
+                guard let url = iterator.next() else { return }
+                let bpm = bpms[url] ?? nil
+                group.addTask(priority: .utility) { (url, try? PrepAnalyzer.suggest(url: url, bpm: bpm).prep) }
+            }
+            for _ in 0..<4 { addNext() }
+            while let (url, fresh) = await group.next() {
+                if let fresh, let old = prep.prep(for: url) {
+                    let moved = Self.regrid(old, to: fresh)
+                    if moved != old { prep.set(moved, for: url); changed += 1 }
+                }
+                addNext()
+            }
+        }
+        UserDefaults.standard.set(Self.gridVersion, forKey: "gridVersion")
+        spindleLog.notice("Re-grid: \(changed) of \(todo.count) tracks got a new grid")
+        if let url = prepPage.selected { _ = url; syncPreviewGrid() }
+    }
+
+    /// The old prep on the fresh grid: same tempo → everything shifts by the
+    /// grid's move (less than half a beat); new tempo → everything snaps to
+    /// the new grid. Suggested cues that were never moved take the fresh
+    /// suggestion.
+    static func regrid(_ old: TrackPrep, to fresh: TrackPrep) -> TrackPrep {
+        var p = old
+        p.bpm = fresh.bpm
+        p.gridOffset = fresh.gridOffset
+        p.gridUnsure = fresh.gridUnsure
+        let sameTempo = abs(fresh.bpm - old.bpm) < 0.01
+        var delta = 0.0
+        if sameTempo {
+            let beat = fresh.beatSeconds
+            delta = (fresh.gridOffset - old.gridOffset).truncatingRemainder(dividingBy: beat)
+            if delta > beat / 2 { delta -= beat }
+            if delta < -beat / 2 { delta += beat }
+        }
+        func move(_ t: Double) -> Double { max(0, p.snap(t + delta)) }
+        for i in p.cues.indices {
+            if p.cues[i].auto, let kind = p.cues[i].kind, let suggested = fresh.cue(kind) {
+                p.cues[i].time = suggested.time
+            } else {
+                p.cues[i].time = move(p.cues[i].time)
+            }
+        }
+        for i in p.loops.indices { p.loops[i].start = move(p.loops[i].start) }
+        return p
+    }
+
     /// Selects a track on the Prep page and loads its waveform.
     func selectForPrep(_ url: URL) {
         guard prepPage.selected != url else { return }
@@ -189,6 +255,7 @@ extension AppModel {
             prep.update(url) { p in
                 p.bpm = fresh.prep.bpm
                 p.gridOffset = fresh.prep.gridOffset
+                p.gridUnsure = fresh.prep.gridUnsure
                 p.cues = fresh.prep.cues
                 p.loops = fresh.prep.loops
             }
@@ -213,8 +280,18 @@ extension AppModel {
 
     /// Jumps the deck to cue slot `n` (0-based). The record keeps control from there.
     func jump(deck: DeckModel, toCue n: Int) {
-        guard let url = deck.track?.url, let cues = prep.prep(for: url)?.cues, cues.indices.contains(n) else { return }
-        engine?.decks[deck.id].jumpRequest = cues[n].time
+        guard let url = deck.track?.url, let p = prep.prep(for: url), p.cues.indices.contains(n),
+              let e = engine?.decks[deck.id] else { return }
+        let t = e.telemetry.pointee
+        e.jumpRequest = abs(t.pitch) > 0.05 ? Self.quantized(from: t.playhead, to: p.cues[n].time, beat: p.beatSeconds) : p.cues[n].time
+    }
+
+    /// A jump that keeps the beat going: moves by a whole number of beats,
+    /// landing as close to `target` as possible at the same point in the
+    /// beat as now. Stopped decks jump straight to the target instead.
+    static func quantized(from now: Double, to target: Double, beat: Double) -> Double {
+        guard beat > 0.05 else { return target }
+        return now + ((target - now) / beat).rounded() * beat
     }
 
     /// Plays a loop slot on a deck: jumps to its in-point and loops it.
@@ -227,7 +304,17 @@ extension AppModel {
             return
         }
         e.loopActive = false
-        e.jumpRequest = loop.start
+        let length = Double(loop.beats) * p.beatSeconds
+        let t = e.telemetry.pointee
+        if abs(t.pitch) > 0.05 {
+            // Enter the loop in time: same point in the beat, inside the loop.
+            var at = Self.quantized(from: t.playhead, to: loop.start, beat: p.beatSeconds)
+            while at < loop.start - 0.001 { at += p.beatSeconds }
+            while at >= loop.start + length { at -= length }
+            e.jumpRequest = at
+        } else {
+            e.jumpRequest = loop.start
+        }
         e.loopStart = loop.start
         e.loopLength = Double(loop.beats) * p.beatSeconds
         e.loopActive = true

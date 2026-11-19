@@ -127,8 +127,8 @@ extension AppModel {
 
     /// Jumps to cue slot `n` (0-based).
     func prepJump(cue n: Int) {
-        guard let cues = prepGrid?.cues, cues.indices.contains(n) else { return }
-        prepSeek(to: cues[n].time)
+        guard let p = prepGrid, p.cues.indices.contains(n) else { return }
+        prepSeek(to: prepPage.playing ? AppModel.quantized(from: prepPosition, to: p.cues[n].time, beat: p.beatSeconds) : p.cues[n].time)
     }
 
     /// Moves cue slot `n` to the beat nearest the playhead, or adds a cue.
@@ -181,7 +181,14 @@ extension AppModel {
         e.loopActive = false
         e.loopStart = loop.start
         e.loopLength = Double(loop.beats) * p.beatSeconds
-        prepSeek(to: loop.start)
+        if prepPage.playing {
+            var at = AppModel.quantized(from: prepPosition, to: loop.start, beat: p.beatSeconds)
+            while at < loop.start - 0.001 { at += p.beatSeconds }
+            while at >= loop.start + e.loopLength { at -= e.loopLength }
+            prepSeek(to: at)
+        } else {
+            prepSeek(to: loop.start)
+        }
         e.loopActive = true
         prepPage.activeLoop = id
         if !prepPage.playing { prepSetPlaying(true) }
@@ -203,6 +210,7 @@ extension AppModel {
         prep.update(url) { p in
             let bar = 4 * p.beatSeconds
             p.gridOffset = here - (here / bar).rounded(.down) * bar
+            p.gridUnsure = nil          // you set it by ear
         }
         syncPreviewGrid()
     }

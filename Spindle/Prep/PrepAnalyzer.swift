@@ -37,7 +37,7 @@ nonisolated enum PrepAnalyzer {
         let startBPM = bpm ?? TrackAnalyzer.estimateTempo(onset.full, frameRate: onset.frameRate)
         let duration = Double(mono.count) / rate
 
-        let (refinedBPM, phase) = fitGrid(onset: onset, bpm: startBPM)
+        let (refinedBPM, phase, sure) = fitGrid(onset: onset, bpm: startBPM)
         let beat = 60 / refinedBPM
         let downbeatShift = findDownbeat(onset: onset, phase: phase, beat: beat)
         var first = phase + Double(downbeatShift) * beat
@@ -45,6 +45,7 @@ nonisolated enum PrepAnalyzer {
         while first - bar >= -0.02 { first -= bar }
 
         var prep = TrackPrep(bpm: refinedBPM, gridOffset: first)
+        prep.gridUnsure = sure ? nil : true
         suggestCues(&prep, onset: onset, duration: duration)
         let (peaks, lows) = overview(mono, onset: onset, rate: rate)
         return PrepSuggestion(prep: prep, peaks: peaks, lows: lows)
@@ -53,7 +54,7 @@ nonisolated enum PrepAnalyzer {
     // MARK: Grid
 
     /// Finds the tempo and phase that put the most onset strength on beats.
-    static func fitGrid(onset: TrackAnalyzer.OnsetFeatures, bpm: Double) -> (bpm: Double, phase: Double) {
+    static func fitGrid(onset: TrackAnalyzer.OnsetFeatures, bpm: Double) -> (bpm: Double, phase: Double, sure: Bool) {
         let fr = onset.frameRate
         // The grid sits on the kick: low band, with a little full band to
         // break ties. More full band pulls it onto off-beat hi-hats.
@@ -87,18 +88,51 @@ nonisolated enum PrepAnalyzer {
         var finalBPM = best.bpm
         let rounded = finalBPM.rounded()
         if abs(finalBPM - rounded) < 0.06 { finalBPM = rounded }
-        // Re-fit the phase at the final tempo, with sub-frame precision.
-        let step = fr * 60 / finalBPM
-        var bestPhase = best.phase, bestScore = -Float.infinity
-        var p = 0.0
-        while p < step {
-            let s = score(finalBPM, p)
-            if s > bestScore { bestScore = s; bestPhase = p }
-            p += 0.25
+        // Phase: where the kick sits in the beat. Fold the low band (kick)
+        // over every beat of the track at the final tempo and take the peak.
+        // Full band is left out: hi-hats and percussion between the kicks
+        // pulled the grid off the beat on about one track in five.
+        let (phase, sure) = kickPhase(onset: onset, bpm: finalBPM)
+        return (finalBPM, phase, sure)
+    }
+
+    /// Time (s) of the first kick-aligned grid line, within one beat.
+    /// `sure` is false when the low band hits as hard between the beats
+    /// (an off-beat bassline) as on them: then it may have picked the wrong one.
+    static func kickPhase(onset: TrackAnalyzer.OnsetFeatures, bpm: Double) -> (Double, Bool) {
+        let fr = onset.frameRate
+        let beatFrames = fr * 60 / bpm
+        let bins = 96
+        var profile = [Double](repeating: 0, count: bins)
+        // Low band only: mixing in the full band (even as a tie-breaker)
+        // let hi-hats just before the kick drag clear grids off it.
+        let low = onset.low
+        // Per frame, which part of the beat it falls in (linear split between two bins).
+        for (i, v) in low.enumerated() where v > 0 {
+            let pos = Double(i).truncatingRemainder(dividingBy: beatFrames) / beatFrames * Double(bins)
+            let b0 = Int(pos) % bins, b1 = (b0 + 1) % bins
+            let f = pos - Double(Int(pos))
+            profile[b0] += Double(v) * (1 - f)
+            profile[b1] += Double(v) * f
         }
+        // Light smoothing, circular.
+        var smooth = profile
+        for b in 0..<bins {
+            smooth[b] = 0.25 * profile[(b + bins - 1) % bins] + 0.5 * profile[b] + 0.25 * profile[(b + 1) % bins]
+        }
+        let peak = smooth.indices.max { smooth[$0] < smooth[$1] } ?? 0
+        // Parabolic refinement around the peak.
+        let y0 = smooth[(peak + bins - 1) % bins], y1 = smooth[peak], y2 = smooth[(peak + 1) % bins]
+        let denom = y0 - 2 * y1 + y2
+        let shift = abs(denom) > 1e-12 ? 0.5 * (y0 - y2) / denom : 0
+        let phaseFrames = (Double(peak) + shift) / Double(bins) * beatFrames
         // Onset frames sit a little after the attack (half an FFT window).
         let latency = 512.0 / TrackAnalyzer.sampleRate
-        return (finalBPM, max(0, bestPhase / fr - latency))
+        var t = phaseFrames / fr - latency
+        let beat = 60 / bpm
+        while t < 0 { t += beat }
+        let opposite = smooth[(peak + bins / 2) % bins]
+        return (t, y1 > 1.25 * opposite)
     }
 
     /// Which of four beats starts the bar: the one where the sound changes most.
@@ -143,7 +177,8 @@ nonisolated enum PrepAnalyzer {
             return Double(max(onset.low[i - 1], onset.low[i], onset.low[i + 1]))
         }
         while t + bar <= duration {
-            let a = Int(t * fr), b = min(onset.rms.count, Int((t + bar) * fr))
+            // The grid can start a hair before 0:00 (a kick right at the start).
+            let a = max(0, Int(t * fr)), b = min(onset.rms.count, Int((t + bar) * fr))
             guard b > a else { break }
             var pulse = 0.0
             for k in 0..<4 {

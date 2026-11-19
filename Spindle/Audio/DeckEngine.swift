@@ -567,4 +567,51 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         return String(format: "Scrub test: largest sample step with jumps %.3f, with nudges %.3f (clean tone ≈ 0.029); loudest output scrolling while stopped %.4f (should be 0)",
                       run(nudge: false), run(nudge: true), run(nudge: false, stopped: true))
     }
+
+    /// Self-test: a click on every beat at 128 BPM; loop 4 beats while
+    /// playing (like a loop slot pressed mid-beat) and report the gaps
+    /// between clicks in the output (all should be one beat, 468.75 ms).
+    static func loopTest() -> String {
+        let rate = 48000.0, frames = Int(rate * 30), beat = 60.0 / 128
+        let l = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        let r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        l.initialize(repeating: 0, count: frames); r.initialize(repeating: 0, count: frames)
+        var t = 0.0
+        while t < 29 { let i = Int(t * rate); for k in 0..<48 { l[i + k] = 0.9 * Float(1 - Double(k) / 48); r[i + k] = l[i + k] }; t += beat }
+        let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+        samples.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+        let deck = DeckEngine(definition: .traktorMK2, sampleRate: rate)
+        deck.internalMode = true
+        _ = deck.exchangeTrack(samples)
+        deck.jumpRequest = 0.5
+        deck.transportPlaying = true
+        let out = UnsafeMutablePointer<Float>.allocate(capacity: 128), out2 = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+        var clicks: [Double] = []
+        var peaks: [String] = []
+        var n = 0, above = false
+        for b in 0..<3000 {
+            if b == 900 {
+                // Press a loop slot: 4 beats from beat 8 (3.75 s), mid-beat.
+                deck.loopActive = false
+                deck.jumpRequest = 8 * beat
+                deck.loopStart = 8 * beat
+                deck.loopLength = 4 * beat
+                deck.loopActive = true
+            }
+            deck.render(left: out, right: out2, frames: 128, mix: false)
+            let m = (0..<128).map { abs(out[$0]) }.max() ?? 0
+            if m > 0.1 && peaks.count < 12 { peaks.append(String(format: "b%d %.2f@%.3f", b, m, deck.telemetry.pointee.playhead)) }
+            for i in 0..<128 {
+                let v = abs(out[i])
+                if v > 0.5 && !above { clicks.append(Double(n + i) / rate) }
+                above = v > 0.3
+            }
+            n += 128
+        }
+        let gaps = zip(clicks.dropFirst(), clicks).map { ($0 - $1) * 1000 }
+        let odd = gaps.enumerated().filter { abs($0.element - beat * 1000) > 2 }.map { String(format: "#%d %.1f ms", $0.offset, $0.element) }
+        samples.pointee.free(); samples.deallocate(); out.deallocate(); out2.deallocate()
+        return "Loop test: \(gaps.count) gaps, uneven ones: " + (odd.isEmpty ? "none" : odd.joined(separator: ", "))
+            + " · peaks " + peaks.joined(separator: " ") + " · clicks at " + clicks.map { String(format: "%.3f", $0) }.joined(separator: " ")
+    }
 }
