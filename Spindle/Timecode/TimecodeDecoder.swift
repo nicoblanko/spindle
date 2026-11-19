@@ -105,6 +105,9 @@ nonisolated final class TimecodeDecoder {
     /// Consecutive mismatching bits tolerated while locked.
     static let flywheelBits = 4
     private var misses = 0
+    /// Counts lock acquisitions, so a fresh lock can be told from one that
+    /// is still held from before the needle was lifted.
+    private(set) var lockSerial = 0
 
     init(config: DecoderConfig, definition: TimecodeDefinition, sampleRate: Double) {
         self.config = config
@@ -313,6 +316,7 @@ nonisolated final class TimecodeDecoder {
         if timecode == bitstream {
             validBits += 1
             misses = 0
+            if validBits == Self.lockBits { lockSerial &+= 1 }
         } else if validBits >= Self.lockBits && misses < Self.flywheelBits {
             // Flywheel: once locked, a few bad bits (dust, a nudge, a change
             // of direction) don't drop the lock. Trust the prediction and

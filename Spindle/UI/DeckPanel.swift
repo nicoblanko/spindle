@@ -156,14 +156,29 @@ struct DeckPanel: View {
                         .frame(width: 96, height: 96)
                     VStack(alignment: .leading, spacing: Theme.space1) {
                         lockBadge(t)
-                        readout("Position", t.lockHeld ? Self.clock(t.timecodeSeconds) : "—", width: 110)
+                        readout("Position", t.lockHeld && !t.coasting ? Self.clock(t.timecodeSeconds) : "—", width: 110)
                         readout("Signal", Self.db(t.signal), width: 110)
                         SignalMeter(level: t.signal)
                             .frame(width: 96, height: 4)
-                        Text(t.lockHeld ? DecoderConfig.all[Int(t.activeConfig)].label : " ")
-                            .font(Theme.readoutSm)
-                            .foregroundStyle(Theme.inkFaint)
-                            .frame(width: 130, alignment: .leading)
+                        if t.coasting {
+                            Button { model.stopCoasting(deck: deck) } label: {
+                                Text("■ Stop deck")
+                                    .font(Theme.readoutSm)
+                                    .foregroundStyle(Theme.ink)
+                                    .padding(.horizontal, 6)
+                                    .frame(height: 14)
+                                    .background(Theme.control)
+                                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                            }
+                            .buttonStyle(.plain)
+                                .help("The needle is up and the track is playing on. Stop it here, or put the needle back on a turning record.")
+                                .frame(width: 130, height: 14, alignment: .leading)
+                        } else {
+                            Text(t.lockHeld ? DecoderConfig.all[Int(t.activeConfig)].label : " ")
+                                .font(Theme.readoutSm)
+                                .foregroundStyle(Theme.inkFaint)
+                                .frame(width: 130, height: 14, alignment: .leading)
+                        }
                     }
                 }
             }
@@ -173,8 +188,8 @@ struct DeckPanel: View {
 
     private func lockBadge(_ t: DeckTelemetry) -> some View {
         let noSignal = t.signal < 0.002 && !t.lockHeld
-        let text = noSignal ? "No signal" : (t.lockHeld ? "Locked" : "Searching")
-        let color = noSignal ? Theme.warn : (t.lockHeld ? Theme.match : Theme.inkMuted)
+        let text = t.coasting ? "Needle up" : noSignal ? "No signal" : (t.lockHeld ? "Locked" : "Searching")
+        let color = t.coasting ? deck.color : noSignal ? Theme.warn : (t.lockHeld ? Theme.match : Theme.inkMuted)
         return HStack(spacing: Theme.space1) {
             Circle().fill(color).frame(width: 6, height: 6)
             LabelText(text, color: color)
@@ -209,6 +224,9 @@ struct DeckPanel: View {
                 Button("▶ 33⅓") { model.setSimulatedPitch(1, deck: deck) }
                 Button("+8%") { model.setSimulatedPitch(1.08, deck: deck) }
                 Spacer()
+                Button(deck.simulatorLifted ? "Drop needle" : "Lift needle") {
+                    model.setSimulatorLifted(!deck.simulatorLifted, deck: deck)
+                }
                 Button("Needle to start") { model.seekSimulator(seconds: 1, deck: deck) }
             }
             .buttonStyle(FlatButtonStyle())

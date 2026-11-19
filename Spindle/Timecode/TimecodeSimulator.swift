@@ -37,6 +37,11 @@ nonisolated final class TimecodeSimulator {
         while codeIndex > target { code = definition.reverse(code); codeIndex -= 1 }
     }
 
+    /// Needle lifted off the record: only a little noise reaches the input,
+    /// while the platter keeps turning.
+    var lifted = false
+    private var noise: UInt32 = 0x12345
+
     /// Set from the UI to drop the needle; applied on the audio thread.
     var seekRequest: Double = -1
 
@@ -53,6 +58,12 @@ nonisolated final class TimecodeSimulator {
             phase = min(max(phase + pitch * step, 0), maxCycle)
             let cycle = Int(phase)
             if cycle != codeIndex { seek(toCycle: cycle) }
+            if lifted {
+                noise = noise &* 1664525 &+ 1013904223
+                left[i] = (Float(noise >> 8) / Float(1 << 24) - 0.5) * 0.001
+                right[i] = left[i]
+                continue
+            }
             let amplitude: Float = !definition.decodesPosition || definition.bit(of: code) ? 0.3 : 0.2
             let theta = 2 * Double.pi * phase
             left[i] = Float(sin(theta)) * amplitude

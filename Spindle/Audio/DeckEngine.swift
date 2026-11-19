@@ -26,6 +26,9 @@ nonisolated struct DeckTelemetry {
     var signal: Float = 0
     var activeConfig: Int32 = 0
     var validBits: Int32 = 0
+    /// The needle left the record while the track was playing, and the deck
+    /// carries on at the last speed until the needle is back.
+    var coasting = false
 }
 
 nonisolated final class DeckEngine: @unchecked Sendable {
@@ -77,10 +80,36 @@ nonisolated final class DeckEngine: @unchecked Sendable {
 
     var toneFrequency: Double = 440
 
+    // MARK: Needle up
+
+    /// Set from the UI to stop a deck that is playing on with the needle up.
+    var stopCoastRequest = false
+    private(set) var coasting = false
+    private var coastPitch: Double = 0
+    private var coastSamples = 0
+    private var wasLocked = false
+    /// Pitch of the last buffers, newest last, to read the speed from just
+    /// before the needle left (the decoder's own reading is noise by then).
+    private var pitchHistory = [Double](repeating: 0, count: 64)
+    private var levelHistory = [Float](repeating: 0, count: 64)
+    private var historyWrite = 0
+    /// Peak input level of the last buffer.
+    private var inputLevel: Float = 0
+    private var coastLevel: Float = 0
+    private var coastSerial = 0
+    private var levelBackSamples = 0
+    /// A new lock must hold this many bits (0.3 s) before the deck follows it
+    /// again: a false lock on landing drops out well before that.
+    private let confirmBits: Int
+    /// A needle that is up for longer than this was put back (the record ran
+    /// out): the track carries on. A shorter hop is a needle drop.
+    static let returnSeconds = 1.0
+
     init(definition: TimecodeDefinition, sampleRate: Double) {
         self.sampleRate = sampleRate
         decoders = DecoderConfig.all.map { TimecodeDecoder(config: $0, definition: definition, sampleRate: sampleRate) }
         canSearch = definition.decodesPosition
+        confirmBits = Int(0.3 * definition.bitRate)
         telemetry = .allocate(capacity: 1)
         telemetry.initialize(to: DeckTelemetry())
         scope = .allocate(capacity: Self.scopeFrames * 2)
@@ -108,8 +137,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         let current = decoders[active]
         // No carrier (needle up, record stopped): nothing to search for.
         let searching = canSearch && unlockedSamples > Int(sampleRate * 0.5) && current.envelope > 0.002 && abs(current.pitch) > 0.02
+        var peak: Float = 0
         for i in 0..<frames {
             let l = left[i], r = right[i]
+            peak = max(peak, abs(l), abs(r))
             if searching {
                 for decoder in decoders { decoder.process(left: l, right: r) }
             } else {
@@ -119,6 +150,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             scope[scopeWrite * 2 + 1] = r
             scopeWrite = (scopeWrite + 1) & (Self.scopeFrames - 1)
         }
+        inputLevel = peak
         unlockedSamples = current.hasPosition ? 0 : unlockedSamples + frames
 
         // Follow the decoder that has locked onto the position. Stay with it
@@ -142,13 +174,17 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             playhead = 0
             anchorPending = true
         }
-        if anchorPending && decoder.hasPosition {
+        updateCoasting(decoder: decoder, frames: frames)
+        if coasting {
+            target = coastPitch
+        }
+        if anchorPending && decoder.hasPosition && !coasting {
             // Tie the track to the record where it is now.
             trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
             anchorPending = false
         }
         let position = decoder.positionSeconds(startIndex: startIndex) - trackOffset
-        let absolute = absoluteMode && decoder.hasPosition && !anchorPending
+        let absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
         if absolute {
             let error = position - playhead
             if abs(error) > 0.15 {
@@ -188,10 +224,11 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             playhead += r / sampleRate
         }
         rate = target
+        wasLocked = decoder.hasPosition
         samplesSinceLock = decoder.hasPosition ? 0 : samplesSinceLock + frames
 
         telemetry.pointee = DeckTelemetry(
-            pitch: decoder.pitch,
+            pitch: coasting ? coastPitch : decoder.pitch,
             forwards: decoder.forwards,
             playhead: playhead,
             timecodeSeconds: decoder.hasPosition ? position : telemetry.pointee.timecodeSeconds,
@@ -201,7 +238,61 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             absolute: absolute,
             signal: decoder.envelope,
             activeConfig: Int32(active),
-            validBits: Int32(decoder.validBits))
+            validBits: Int32(decoder.validBits),
+            coasting: coasting)
+    }
+
+    /// The input level fell away at once while the record was turning
+    /// steadily: the needle was lifted or ran off the end. Keep playing at that
+    /// speed. When the needle is back and the decoder has locked afresh, a
+    /// needle that was up for a while carries the track on from where it is;
+    /// a quick hop in absolute mode stays a needle drop.
+    private func updateCoasting(decoder: TimecodeDecoder, frames: Int) {
+        if stopCoastRequest {
+            stopCoastRequest = false
+            coasting = false
+        }
+        let bufferSeconds = Double(frames) / sampleRate
+        let count = pitchHistory.count
+        func back(_ seconds: Double) -> Int {
+            let n = min(count - 1, max(1, Int((seconds / bufferSeconds).rounded())))
+            return (historyWrite - n + count * 2) % count
+        }
+
+        if coasting {
+            coastSamples += frames
+            if inputLevel > coastLevel * 0.3 {
+                levelBackSamples += frames
+            } else {
+                levelBackSamples = 0
+            }
+            let back = Double(levelBackSamples) / sampleRate
+            let freshLock = decoder.hasPosition && decoder.lockSerial != coastSerial && decoder.validBits >= confirmBits
+            if back > 0.02 && (freshLock || (back > 1.5 && decoder.hasPosition)) {
+                coasting = false
+                let upFor = Double(coastSamples - levelBackSamples) / sampleRate
+                if !absoluteMode || upFor > Self.returnSeconds {
+                    anchorPending = true          // carry on from the playhead
+                }
+            }
+        } else {
+            let earlier = back(0.04), recent = back(0.01)
+            let p40 = pitchHistory[earlier], p10 = pitchHistory[recent]
+            let level40 = levelHistory[earlier]
+            let steady = abs(p10 - p40) < 0.06 * abs(p40) && abs(p40) > 0.5 && abs(p40) < 1.6
+            if wasLocked && steady && level40 > 0.005 && inputLevel < level40 * 0.2 {
+                coasting = true
+                coastPitch = p40
+                coastLevel = level40
+                coastSerial = decoder.lockSerial
+                coastSamples = 0
+                levelBackSamples = 0
+            }
+        }
+
+        pitchHistory[historyWrite] = decoder.pitch
+        levelHistory[historyWrite] = inputLevel
+        historyWrite = (historyWrite + 1) % count
     }
 
     @inline(__always)

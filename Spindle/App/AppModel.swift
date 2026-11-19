@@ -18,6 +18,7 @@ final class DeckModel: Identifiable {
     var error: String?
     /// Speed of the virtual turntable in simulation mode.
     var simulatedPitch: Double = 0
+    var simulatorLifted = false
     var absoluteMode = true
     var testTone = false
 
@@ -287,6 +288,16 @@ final class AppModel {
 
     func seekSimulator(seconds: Double, deck: DeckModel) {
         engine?.simulators[deck.id].seekRequest = seconds
+    }
+
+    func setSimulatorLifted(_ lifted: Bool, deck: DeckModel) {
+        deck.simulatorLifted = lifted
+        engine?.simulators[deck.id].lifted = lifted
+    }
+
+    /// Stops a deck that is playing on with the needle up.
+    func stopCoasting(deck: DeckModel) {
+        engine?.decks[deck.id].stopCoastRequest = true
     }
 
     /// Frees sample memory once the audio thread has certainly moved on.
