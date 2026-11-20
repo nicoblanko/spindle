@@ -16,7 +16,8 @@ enum WaveformRenderer {
     /// Draws seconds `start` … `start + span` of `track` into `rect`.
     /// Everything before `playhead` is drawn dimmer.
     static func draw(_ context: GraphicsContext, track: LoadedTrack, start: Double, span: Double,
-                     rect: CGRect, playhead: Double, color: Color = Theme.ink, dimPlayed: Bool = true) {
+                     rect: CGRect, playhead: Double, color: Color = Theme.ink, dimPlayed: Bool = true,
+                     half: Bool = false) {
         let peaks = track.peaks
         guard !peaks.isEmpty, span > 0, rect.width > 1 else { return }
         let scale = max(context.environment.displayScale, 1)
@@ -28,8 +29,9 @@ enum WaveformRenderer {
         let columnSeconds = Double(bins) / rate
         let first = max(0, Int((start / columnSeconds).rounded(.down)) - 2)
         let last = Int(((start + span) / columnSeconds).rounded(.up)) + 2
-        let mid = rect.midY
-        let half = rect.height / 2
+        // Half: one side only, rising from the bottom over the full height.
+        let mid = half ? rect.maxY : rect.midY
+        let height = half ? rect.height : rect.height / 2
         func x(_ t: Double) -> CGFloat { rect.minX + CGFloat((t - start) / span) * rect.width }
 
         // The loudness per column, then lightly smoothed so the outline has
@@ -56,7 +58,7 @@ enum WaveformRenderer {
         // where the playhead is so the played part can be dimmer.
         let points: [(x: CGFloat, h: CGFloat, t: Double)] = smooth.indices.map { i in
             let t = (Double(first + i) + 0.5) * columnSeconds
-            return (x(t), max(0.5 / scale, CGFloat(smooth[i]) * half), t)
+            return (x(t), max(0.5 / scale, CGFloat(smooth[i]) * height), t)
         }
         func fill(_ part: ArraySlice<(x: CGFloat, h: CGFloat, t: Double)>, _ c: Color) {
             guard part.count > 1 else { return }
@@ -64,7 +66,7 @@ enum WaveformRenderer {
             path.move(to: CGPoint(x: part.first!.x, y: mid))
             for p in part { path.addLine(to: CGPoint(x: p.x, y: mid - p.h)) }
             path.addLine(to: CGPoint(x: part.last!.x, y: mid))
-            for p in part.reversed() { path.addLine(to: CGPoint(x: p.x, y: mid + p.h)) }
+            if !half { for p in part.reversed() { path.addLine(to: CGPoint(x: p.x, y: mid + p.h)) } }
             path.closeSubpath()
             context.fill(path, with: .color(c))
         }
