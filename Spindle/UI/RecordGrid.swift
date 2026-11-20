@@ -30,6 +30,9 @@ struct RecordGrid: View {
     /// Controls before the row number (Mix: played box, A and B).
     var leading: ((Record) -> AnyView)? = nil
     var leadingWidth: CGFloat = 0
+    /// The listen column's cell (Organize); without it there's no such column.
+    var listen: ((Record) -> AnyView)? = nil
+    var listenWidth: CGFloat = 0
     /// Width of the Track column (narrower on Prep).
     var nameWidth: CGFloat = 300
     @State private var anchor: URL?
@@ -38,6 +41,7 @@ struct RecordGrid: View {
     @State private var renaming: UUID?
     @State private var renameText = ""
     @State private var deleting: CustomField?
+    @State private var dropTarget: FieldRef?
 
     private var context: RecordContext { model.records }
     /// Option lists for this redraw (each cell used to rebuild them).
@@ -70,6 +74,8 @@ struct RecordGrid: View {
     private func width(_ f: FieldRef) -> CGFloat {
         switch f {
         case .name: nameWidth
+        case .listen: listenWidth
+        case .index: 36
         case .folder: 100
         case .bpm: 58
         case .key: 86
@@ -92,7 +98,7 @@ struct RecordGrid: View {
         }
     }
 
-    private var totalWidth: CGFloat { 36 + columns.reduce(0) { $0 + width($1) } + 44 }
+    private var totalWidth: CGFloat { (leading != nil ? leadingWidth : 0) + columns.reduce(0) { $0 + width($1) } + 44 }
 
     private var groups: [RecordContext.Group]? {
         view.groupBy.map { context.group(records, by: $0) }
@@ -106,7 +112,7 @@ struct RecordGrid: View {
 
     var body: some View {
         let _ = optionCache.map.removeAll(keepingCapacity: true)
-        let _ = columnCache.refresh(context.orderedFields(view).filter { !view.hidden.contains($0) })
+        let _ = columnCache.refresh(context.orderedFields(view).filter { !view.hidden.contains($0) && ($0 != .listen || listen != nil) })
         GeometryReader { geo in
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
@@ -158,17 +164,32 @@ struct RecordGrid: View {
     private var header: some View {
         HStack(spacing: 0) {
             if leading != nil { Color.clear.frame(width: leadingWidth) }
-            Text("#").frame(width: 36)
             ForEach(columns, id: \.self) { f in headerCell(f) }
             Button { addingField = true } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 44, height: 28)
             }
             .buttonStyle(.plain)
-            .help("Add a field")
+            .help("Add a column")
             .popover(isPresented: $addingField) {
-                AddFieldView { name, type in
-                    let id = model.fields.addField(name: name, type: type)
-                    view.hidden.remove(.custom(id))
+                VStack(alignment: .leading, spacing: 0) {
+                    let removed = context.orderedFields(view)
+                        .filter { view.hidden.contains($0) && ($0 != .listen || listen != nil) }
+                    if !removed.isEmpty {
+                        LabelText("Put back").padding([.horizontal, .top], Theme.space3)
+                        FlowLayout(spacing: 4) {
+                            ForEach(removed, id: \.self) { f in
+                                Button(context.name(f)) { view.hidden.remove(f); addingField = false }
+                                    .buttonStyle(SmallButtonStyle())
+                            }
+                        }
+                        .frame(width: 260, alignment: .leading)
+                        .padding(Theme.space3)
+                        Rectangle().fill(Theme.line).frame(height: 1)
+                    }
+                    AddFieldView { name, type in
+                        let id = model.fields.addField(name: name, type: type)
+                        view.hidden.remove(.custom(id))
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -195,10 +216,10 @@ struct RecordGrid: View {
                         renaming = nil
                     }
                     .onExitCommand { renaming = nil }
-            } else {
+            } else if f != .listen {
                 Text(context.name(f)).lineLimit(1)
             }
-            if f.locked && f != .name && f != .folder {
+            if f.locked && f != .name && f != .folder && f != .index && f != .listen {
                 Image(systemName: "lock.fill").font(.system(size: 7)).foregroundStyle(Theme.inkFaint)
                     .help("Filled in by analysis")
             }
@@ -212,16 +233,45 @@ struct RecordGrid: View {
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
         .contentShape(Rectangle())
         .onTapGesture {
+            guard f != .listen else { return }
             // Click: sort ascending, again descending, again off.
             if view.sortField != f { view.sortField = f; view.sortAscending = true }
             else if view.sortAscending { view.sortAscending = false }
             else { view.sortField = nil }
         }
+        // Drag a header onto another to move the column there.
+        .draggable(Self.dragKey(f)) { Text(context.name(f)).font(Theme.label).padding(6).background(Theme.control) }
+        .dropDestination(for: String.self) { items, _ in
+            guard let key = items.first, let moved = context.orderedFields(view).first(where: { Self.dragKey($0) == key }),
+                  moved != f else { return false }
+            var order = context.orderedFields(view)
+            order.removeAll { $0 == moved }
+            let target = order.firstIndex(of: f) ?? order.count
+            let from = columns.firstIndex(of: moved) ?? 0, to = columns.firstIndex(of: f) ?? 0
+            order.insert(moved, at: from < to ? target + 1 : target)
+            view.fieldOrder = order
+            return true
+        } isTargeted: { on in dropTarget = on ? f : (dropTarget == f ? nil : dropTarget) }
+        .overlay(alignment: .leading) {
+            if dropTarget == f { Rectangle().fill(Theme.accent).frame(width: 2) }
+        }
         .contextMenu { headerMenu(f) }
     }
 
+    private static func dragKey(_ f: FieldRef) -> String { "spindle.column:\(f)" }
+
     @ViewBuilder
     private func headerMenu(_ f: FieldRef) -> some View {
+        if f == .listen || f == .index {
+            if f == .index { Button("Sort by list order") { view.sortField = nil } }
+            Button("Remove column") { view.hidden.insert(f) }
+        } else {
+            fieldMenu(f)
+        }
+    }
+
+    @ViewBuilder
+    private func fieldMenu(_ f: FieldRef) -> some View {
         if case .custom(let id) = f, let field = model.fields.field(id) {
             Button("Rename field") { renameText = field.name; renaming = id }
             if field.type == .multiSelect || field.type == .singleSelect {
@@ -236,7 +286,7 @@ struct RecordGrid: View {
         Button("Filter by this field") {
             view.conditions.append(FilterCondition(field: f, op: FilterOp.ops(for: context.kind(f)).first!))
         }
-        if f != .name { Button("Hide field") { view.hidden.insert(f) } }
+        if f != .name { Button("Remove column") { view.hidden.insert(f) } }
         if case .custom(let id) = f, let field = model.fields.field(id) {
             Divider()
             Button("Delete field…", role: .destructive) { deleting = field }
@@ -276,7 +326,6 @@ struct RecordGrid: View {
         let isSelected = selected.contains(r.id)
         return HStack(spacing: 0) {
             if let leading { leading(r).frame(width: leadingWidth) }
-            Text("\(r.index)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint).frame(width: 36)
             ForEach(columns, id: \.self) { f in
                 cell(r, f)
                     .padding(.horizontal, Theme.space2)
@@ -324,6 +373,11 @@ struct RecordGrid: View {
     @ViewBuilder
     private func cell(_ r: Record, _ f: FieldRef) -> some View {
         switch f {
+        case .listen:
+            if let listen { listen(r).padding(.horizontal, -Theme.space2) }
+        case .index:
+            Text("\(r.index)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
+                .frame(maxWidth: .infinity, alignment: .center)
         case .name:
             HStack(spacing: 4) {
                 if mixes(r) { Circle().fill(Theme.match).frame(width: 6, height: 6) }

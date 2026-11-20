@@ -56,7 +56,6 @@ struct OrganizeView: View {
     @State private var dropTargeted = false
     @State private var showFilter = false
     @State private var showGroup = false
-    @State private var showHide = false
     @State private var naming: Naming?
     @State private var nameDraft = ""
 
@@ -107,9 +106,6 @@ struct OrganizeView: View {
                     .foregroundStyle(Theme.inkMuted)
             }
             Spacer()
-            toolbarButton(view.hidden.isEmpty ? "Hide fields" : "\(view.hidden.count) hidden fields",
-                          icon: "eye.slash", active: !view.hidden.isEmpty) { showHide = true }
-                .popover(isPresented: $showHide) { HideFieldsView(view: viewBinding, context: model.records) }
             toolbarButton(view.conditions.isEmpty ? "Filter" : "Filtered by \(Set(view.conditions.map(\.field)).map(model.records.name).sorted().joined(separator: ", "))",
                           icon: "line.3.horizontal.decrease", active: !view.conditions.isEmpty) { showFilter = true }
                 .popover(isPresented: $showFilter) { FilterView(view: viewBinding, context: model.records) }
@@ -254,8 +250,8 @@ struct OrganizeView: View {
             mixes: { _ in false },
             menu: { AnyView(contextMenu($0)) },
             dimmed: dimmedInSet,
-            leading: { AnyView(ListenCell(model: model, url: $0.track.url)) },
-            leadingWidth: ListenCell.width)
+            listen: { AnyView(ListenCell(model: model, url: $0.track.url)) },
+            listenWidth: ListenCell.width)
         .overlay {
             if dropTargeted { Rectangle().strokeBorder(Theme.accent, lineWidth: 2) }
         }

@@ -151,7 +151,10 @@ final class FieldStore {
 nonisolated enum FieldRef: Hashable, Codable, Sendable {
     case name, folder, bpm, key, mood, energy, intro, outro, length, tempoGroup, tags, mixReady
     case custom(UUID)
+    /// Grid-only columns: the listen player and the row number.
+    case listen, index
 
+    static let gridOnly: [FieldRef] = [.listen, .index]
     static let builtins: [FieldRef] = [.name, .folder, .bpm, .key, .mood, .energy, .tags, .mixReady, .tempoGroup, .intro, .outro, .length]
 
     /// Read-only fields (computed by analysis), shown with a lock.
@@ -210,7 +213,7 @@ nonisolated struct ViewSettings: Codable, Equatable, Sendable {
     var sortAscending = true
     var hidden: Set<FieldRef> = [.intro, .outro, .mood]
     var collapsed: Set<String> = []
-    /// Column order (after the track name), as arranged in Hide fields.
+    /// Column order, as dragged on the grid.
     var fieldOrder: [FieldRef]?
 
     static let key = "organize.view"
@@ -308,14 +311,16 @@ struct RecordContext {
         case .tempoGroup: "Tempo group"
         case .tags: "Tags"
         case .mixReady: "Marked"
+        case .listen: "Listen"
+        case .index: "#"
         case .custom(let id): fields.field(id)?.name ?? "Field"
         }
     }
 
     func kind(_ ref: FieldRef) -> FieldKind {
         switch ref {
-        case .name, .folder: .text
-        case .bpm, .energy, .length: .number
+        case .name, .folder, .listen: .text
+        case .bpm, .energy, .length, .index: .number
         case .key, .mood, .intro, .outro, .tempoGroup: .select
         case .tags: .multi
         case .mixReady: .checkbox
@@ -332,13 +337,17 @@ struct RecordContext {
 
     var allFields: [FieldRef] { FieldRef.builtins + fields.fields.map { .custom($0.id) } }
 
-    /// All fields in the view's column order: the track name first, then
-    /// the arranged fields, then any new fields not arranged yet.
+    /// All columns in the view's order (dragged into place on the grid), then
+    /// any new fields not arranged yet. Listen and # come first by default.
     func orderedFields(_ view: ViewSettings) -> [FieldRef] {
-        let all = allFields
+        let all = FieldRef.gridOnly + allFields
         let existing = Set(all)
-        var result: [FieldRef] = [.name]
-        for f in view.fieldOrder ?? [] where f != .name && existing.contains(f) && !result.contains(f) { result.append(f) }
+        var order = view.fieldOrder ?? []
+        // Orders saved before these were movable: listen, #, track in front.
+        if !order.contains(.name) { order.insert(.name, at: 0) }
+        for f in FieldRef.gridOnly.reversed() where !order.contains(f) { order.insert(f, at: 0) }
+        var result: [FieldRef] = []
+        for f in order where existing.contains(f) && !result.contains(f) { result.append(f) }
         for f in all where !result.contains(f) { result.append(f) }
         return result
     }
@@ -361,6 +370,7 @@ struct RecordContext {
         case .bpm: return r.analysis?.bpm
         case .energy: return r.analysis.map { Double($0.energy) }
         case .length: return r.analysis?.duration
+        case .index: return Double(r.index)
         case .custom(let id):
             switch fields.value(r.path, id) {
             case .number(let n)?: return n
