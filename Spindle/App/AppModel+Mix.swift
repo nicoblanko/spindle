@@ -146,10 +146,11 @@ extension AppModel {
         preparing = 0
     }
 
-    /// Grid detection version 2 puts the grid on the kick (v1 could land
+    /// Version 5 fixes a 64 ms early grid (the onset correction pointed the
+    /// wrong way). Version 2 puts the grid on the kick (v1 could land
     /// on hi-hats or the off-beat). Once, re-detect every track's grid and
     /// move its cues and loop slots along, so they land on the kick too.
-    static let gridVersion = 4
+    static let gridVersion = 5
 
     func regridIfNeeded() async {
         guard UserDefaults.standard.integer(forKey: "gridVersion") < Self.gridVersion else { return }

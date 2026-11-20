@@ -126,14 +126,21 @@ nonisolated enum PrepAnalyzer {
         let denom = y0 - 2 * y1 + y2
         let shift = abs(denom) > 1e-12 ? 0.5 * (y0 - y2) / denom : 0
         let phaseFrames = (Double(peak) + shift) / Double(bins) * beatFrames
-        // Onset frames sit a little after the attack (half an FFT window).
-        let latency = 512.0 / TrackAnalyzer.sampleRate
-        var t = phaseFrames / fr - latency
+        // A frame's time is where its 1024-sample window starts; a kick shows
+        // up most strongly while it's still in the back of the window, so the
+        // frame time is *ahead* of the kick. Measured with a synthetic kick
+        // track (GridTruth): the true kick is 40.4 ms after the peak frame.
+        // (This used to subtract 23 ms instead, putting every grid ~64 ms
+        // early: loops and cues started before the beat.)
+        var t = phaseFrames / fr + PrepAnalyzer.onsetLag
         let beat = 60 / bpm
         while t < 0 { t += beat }
         let opposite = smooth[(peak + bins / 2) % bins]
         return (t, y1 > 1.25 * opposite)
     }
+
+    /// How far a kick lies after the onset frame that peaks for it.
+    static let onsetLag = 0.0404
 
     /// Which of four beats starts the bar: the one where the sound changes most.
     static func findDownbeat(onset: TrackAnalyzer.OnsetFeatures, phase: Double, beat: Double) -> Int {

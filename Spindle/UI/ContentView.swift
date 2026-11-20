@@ -94,6 +94,10 @@ extension ContentView {
             spindleLog.notice("\(DeckEngine.loopTest())")
             return
         }
+        if ProcessInfo.processInfo.environment["SPINDLE_GRIDTRUTH"] != nil {
+            spindleLog.notice("\(await GridTruth.run())")
+            return
+        }
         if ProcessInfo.processInfo.environment["SPINDLE_JITTER"] != nil {
             // Jitter check: play deck A on Mix and measure how evenly it moves.
             try? await Task.sleep(for: .seconds(4))
