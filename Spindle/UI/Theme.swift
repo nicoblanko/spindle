@@ -33,24 +33,62 @@ final class LookSettings {
     }
 }
 
-/// A deck's colour.
+/// A deck's colour, in three groups.
 enum DeckColor: String, CaseIterable, Identifiable {
-    case white = "White", silver = "Silver", blue = "Blue", cyan = "Cyan", green = "Green",
-         yellow = "Yellow", orange = "Orange", red = "Red", pink = "Pink", violet = "Violet"
+    // Neutrals
+    case white = "White", pearl = "Pearl", silver = "Silver", stone = "Stone", steel = "Steel", graphite = "Graphite"
+    // Vivid
+    case blue = "Blue", cyan = "Cyan", teal = "Teal", green = "Green", lime = "Lime", yellow = "Yellow",
+         gold = "Gold", orange = "Orange", red = "Red", pink = "Pink", magenta = "Magenta", violet = "Violet"
+    // Soft
+    case sky = "Sky", ice = "Ice", mint = "Mint", sage = "Sage", lemon = "Lemon", sand = "Sand",
+         peach = "Peach", coral = "Coral", rose = "Rose", lilac = "Lilac"
     var id: String { rawValue }
+
+    enum Group: String, CaseIterable, Identifiable {
+        case neutrals = "Neutrals", vivid = "Vivid", soft = "Soft"
+        var id: String { rawValue }
+        var colors: [DeckColor] { DeckColor.allCases.filter { $0.group == self } }
+    }
+
+    var group: Group {
+        switch self {
+        case .white, .pearl, .silver, .stone, .steel, .graphite: .neutrals
+        case .blue, .cyan, .teal, .green, .lime, .yellow, .gold, .orange, .red, .pink, .magenta, .violet: .vivid
+        default: .soft
+        }
+    }
 
     var hex: UInt32 {
         switch self {
         case .white: 0xffffff
+        case .pearl: 0xe4dfd6
         case .silver: 0x9aa0a8
+        case .stone: 0xb3a998
+        case .steel: 0x6f7f90
+        case .graphite: 0x5c5c62
         case .blue: 0x4fa3ff
         case .cyan: 0x3fd0e0
+        case .teal: 0x1fc8a0
         case .green: 0x5fd37a
+        case .lime: 0xb6e93a
         case .yellow: 0xf2d13c
+        case .gold: 0xf5a700
         case .orange: 0xf08a24
         case .red: 0xff5a4f
         case .pink: 0xff6fa8
+        case .magenta: 0xe040fb
         case .violet: 0x9b7bd9
+        case .sky: 0x9cc9ff
+        case .ice: 0xc4f1f7
+        case .mint: 0x9ff0c8
+        case .sage: 0xb7d3a8
+        case .lemon: 0xfff1a0
+        case .sand: 0xe8cfa0
+        case .peach: 0xffc39e
+        case .coral: 0xff9a8a
+        case .rose: 0xffaec9
+        case .lilac: 0xc9b6ff
         }
     }
     var color: Color { Color(hex: hex, exact: true) }

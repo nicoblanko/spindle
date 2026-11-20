@@ -31,49 +31,79 @@ struct ColorPanelButton: View {
 
 struct ColorPanel: View {
     @Bindable var look: LookSettings
+    /// Which deck the swatches colour.
+    @State private var deck = 0
+
+    private var selection: Binding<DeckColor> {
+        deck == 0 ? $look.deckAColor : $look.deckBColor
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.space3) {
-            HStack {
-                LabelText("Deck colours")
-                Spacer()
-                Button { withAnimation(.easeOut(duration: 0.15)) { look.panelOpen = false } } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.space3) {
+                HStack {
+                    LabelText("Deck colours")
+                    Spacer()
+                    Button { withAnimation(.easeOut(duration: 0.15)) { look.panelOpen = false } } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.inkMuted)
+                    .help("Close")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.inkMuted)
-                .help("Close")
+                // A | B, each showing its colour.
+                VStack(spacing: 4) {
+                    deckTab(0, "A", look.deckAColor)
+                    deckTab(1, "B", look.deckBColor)
+                }
+                ForEach(DeckColor.Group.allCases) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(group.rawValue).font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 7), count: 6), alignment: .leading, spacing: 7) {
+                            ForEach(group.colors) { swatch($0) }
+                        }
+                    }
+                }
+                Text("Waveforms, deck headers and whatever is active on a deck.")
+                    .font(Theme.caption).foregroundStyle(Theme.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            deckRow("A", selection: $look.deckAColor)
-            deckRow("B", selection: $look.deckBColor)
-            Text("Waveforms, deck headers and whatever is active on a deck.")
-                .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+            .padding(Theme.space3)
         }
-        .padding(Theme.space3)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.panel)
     }
 
-    private func deckRow(_ label: String, selection: Binding<DeckColor>) -> some View {
-        HStack(alignment: .top, spacing: Theme.space2) {
-            Text(label).font(Theme.label).foregroundStyle(selection.wrappedValue.color).frame(width: 12)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 5), spacing: 6) {
-                ForEach(DeckColor.allCases) { c in
-                    let on = selection.wrappedValue == c
-                    Button { selection.wrappedValue = c } label: {
-                        RoundedRectangle(cornerRadius: Theme.radiusSm)
-                            .fill(c.color)
-                            .frame(width: 22, height: 22)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
-                                .stroke(on ? Theme.ink : Color.clear, lineWidth: 2)
-                                .padding(-3))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Deck \(label): \(c.rawValue)")
-                }
+    private func deckTab(_ index: Int, _ label: String, _ color: DeckColor) -> some View {
+        let on = deck == index
+        return Button { deck = index } label: {
+            HStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: Theme.radiusSm).fill(color.color).frame(width: 12, height: 12)
+                Text("Deck \(label)").font(Theme.body).lineLimit(1)
+                Spacer(minLength: 0)
+                Text(color.rawValue).font(Theme.caption).foregroundStyle(Theme.inkFaint).lineLimit(1)
             }
+            .foregroundStyle(on ? Theme.ink : Theme.inkMuted)
+            .padding(.horizontal, 8).frame(height: 28)
+            .background(on ? Theme.panelRaised : Color.clear)
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(on ? Theme.line : Color.clear, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    private func swatch(_ c: DeckColor) -> some View {
+        let on = selection.wrappedValue == c
+        return Button { selection.wrappedValue = c } label: {
+            RoundedRectangle(cornerRadius: Theme.radiusSm)
+                .fill(c.color)
+                .frame(width: 22, height: 22)
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
+                    .stroke(on ? Theme.ink : Color.clear, lineWidth: 2)
+                    .padding(-3))
+        }
+        .buttonStyle(.plain)
+        .help("Deck \(deck == 0 ? "A" : "B"): \(c.rawValue)")
     }
 }
