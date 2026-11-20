@@ -533,6 +533,12 @@ struct SearchField: NSViewRepresentable {
         field.delegate = context.coordinator
         field.sendsSearchStringImmediately = true
         field.controlSize = .regular
+        // The ✕ clears the search and leaves the field.
+        context.coordinator.field = field
+        if let cancel = (field.cell as? NSSearchFieldCell)?.cancelButtonCell {
+            cancel.target = context.coordinator
+            cancel.action = #selector(Coordinator.clear(_:))
+        }
         return field
     }
 
@@ -545,7 +551,13 @@ struct SearchField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
+        weak var field: NSSearchField?
         init(text: Binding<String>) { self.text = text }
+        @objc func clear(_ sender: Any?) {
+            field?.stringValue = ""
+            text.wrappedValue = ""
+            field?.window?.makeFirstResponder(nil)
+        }
         func controlTextDidChange(_ note: Notification) {
             if let field = note.object as? NSTextField { text.wrappedValue = field.stringValue }
         }
