@@ -26,20 +26,32 @@ struct ContentView: View {
                     .padding(Theme.space2)
                     .background(Theme.warn.opacity(0.25))
             }
-            switch model.page {
-            case .organize:
-                OrganizeView(library: model.library, analysis: model.analysis, model: model)
-                    .frame(maxHeight: .infinity)
-            case .prep:
-                PrepView(library: model.library, model: model, page: model.prepPage)
-                    .frame(maxHeight: .infinity)
-            case .mix:
-                MixView(model: model, library: model.library)
-                    .frame(maxHeight: .infinity)
-            case .sessions:
-                SessionsView(model: model, store: model.sessions)
-                    .frame(maxHeight: .infinity)
+            HStack(spacing: 0) {
+                Group {
+                    switch model.page {
+                    case .organize:
+                        OrganizeView(library: model.library, analysis: model.analysis, model: model)
+                            .frame(maxHeight: .infinity)
+                    case .prep:
+                        PrepView(library: model.library, model: model, page: model.prepPage)
+                            .frame(maxHeight: .infinity)
+                    case .mix:
+                        MixView(model: model, library: model.library)
+                            .frame(maxHeight: .infinity)
+                    case .sessions:
+                        SessionsView(model: model, store: model.sessions)
+                            .frame(maxHeight: .infinity)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                if LookSettings.shared.panelOpen {
+                    Rectangle().fill(Theme.line).frame(width: 1)
+                    ColorPanel(look: LookSettings.shared)
+                        .frame(width: 210)
+                        .transition(.move(edge: .trailing))
+                }
             }
+            .frame(maxHeight: .infinity)
             Rectangle().fill(Theme.line).frame(height: 1)
             PageBar(page: $model.page)
         }
@@ -102,12 +114,13 @@ extension ContentView {
         let original = model.page
         // SPINDLE_LOOK=rgb|3-band|mono[,dusk|,ink]: snapshot in that look, then restore yours.
         let look = LookSettings.shared
-        let savedLook = (look.theme, look.waveStyle)
+        let savedLook = (look.theme, look.waveStyle, look.panelOpen)
         if let spec = ProcessInfo.processInfo.environment["SPINDLE_LOOK"]?.lowercased() {
+            look.panelOpen = spec.contains("panel")
             look.theme = spec.contains("ink") || spec.contains("darker") ? .ink : spec.contains("dusk") ? .dusk : .studio
             look.waveStyle = spec.contains("rgb") ? .rgb : spec.contains("mono") ? .mono : .threeBand
         }
-        defer { look.theme = savedLook.0; look.waveStyle = savedLook.1 }
+        defer { look.theme = savedLook.0; look.waveStyle = savedLook.1; look.panelOpen = savedLook.2 }
         try? await Task.sleep(for: .seconds(4))
         let tracks = model.library.tracks
         // Speed check: building the Organize list with the current view.
@@ -356,7 +369,6 @@ private struct TopBar: View {
                 Text(SessionStore.clock(model.sessions.elapsed)).font(Theme.readoutSm).foregroundStyle(Theme.ink)
             }
             Spacer()
-            LookMenu(look: LookSettings.shared)
             Button("MIDI") { model.showingMIDI = true }
                 .buttonStyle(FlatButtonStyle())
                 .help("Map an Akai MPK mini or other MIDI controller (MIDI learn)")
@@ -400,6 +412,7 @@ private struct TopBar: View {
             }
 
             status
+            ColorPanelButton(look: LookSettings.shared)
         }
         .font(Theme.body)
         .foregroundStyle(Theme.inkMuted)
@@ -421,42 +434,6 @@ private struct TopBar: View {
         } else {
             LabelText("Stopped", color: Theme.inkFaint)
         }
-    }
-}
-
-/// Darker theme and waveform style.
-private struct LookMenu: View {
-    @Bindable var look: LookSettings
-
-    var body: some View {
-        Menu {
-            Picker("Theme", selection: $look.theme) {
-                ForEach(AppTheme.allCases) { theme in
-                    Text("\(theme.rawValue) — \(theme.summary)").tag(theme)
-                }
-            }
-            .pickerStyle(.inline)
-            Picker("Waveform", selection: $look.waveStyle) {
-                ForEach(WaveStyle.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.inline)
-            Divider()
-            Picker("3-Band colours", selection: $look.bandPalette) {
-                ForEach(BandPalette.allCases) { p in Text("\(p.rawValue) — \(p.summary)").tag(p) }
-            }
-            Picker("Deck A colour", selection: $look.deckAColor) {
-                ForEach(DeckColor.allCases) { Text($0.rawValue).tag($0) }
-            }
-            Picker("Deck B colour", selection: $look.deckBColor) {
-                ForEach(DeckColor.allCases) { Text($0.rawValue).tag($0) }
-            }
-        } label: {
-            Image(systemName: "circle.lefthalf.filled")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Theme (Studio, Dusk, Ink) and waveform colours")
     }
 }
 

@@ -27,6 +27,11 @@ final class LookSettings {
 
     init() { LookFlags.saturation = theme.saturation }
 
+    /// The colour panel on the right is open.
+    var panelOpen = UserDefaults.standard.bool(forKey: "look.panel") {
+        didSet { UserDefaults.standard.set(panelOpen, forKey: "look.panel") }
+    }
+
     private static var savedTheme: AppTheme {
         if let raw = UserDefaults.standard.string(forKey: "look.theme"), let t = AppTheme(rawValue: raw) { return t }
         return UserDefaults.standard.bool(forKey: "look.darker") ? .ink : .studio     // the old switch

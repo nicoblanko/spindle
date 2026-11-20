@@ -19,9 +19,9 @@
 import SwiftUI
 
 enum WaveformRenderer {
-    static var lowColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.low) }
-    static var midColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.mid) }
-    static var highColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.high) }
+    static var lowColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.low, exact: true) }
+    static var midColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.mid, exact: true) }
+    static var highColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.high, exact: true) }
 
     /// Draws seconds `start` … `start + span` of `track` into `rect`.
     /// Everything before `playhead` is drawn dimmer.
