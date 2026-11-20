@@ -25,14 +25,14 @@ final class LookSettings {
 
     /// Each deck's colour: its waveforms, header and active controls. The
     /// only colour in the black-and-white theme, so the decks stay apart.
-    var deckAColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckA") ?? "") ?? .blue {
+    var deckAColor = DeckColor(stored: UserDefaults.standard.string(forKey: "look.deckA") ?? "") ?? .blue {
         didSet { UserDefaults.standard.set(deckAColor.rawValue, forKey: "look.deckA") }
     }
-    var deckBColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckB") ?? "") ?? .orange {
+    var deckBColor = DeckColor(stored: UserDefaults.standard.string(forKey: "look.deckB") ?? "") ?? .orange {
         didSet { UserDefaults.standard.set(deckBColor.rawValue, forKey: "look.deckB") }
     }
     /// The Prep player's colour: its waveform, loop slots and play button.
-    var prepColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.prep") ?? "") ?? .white {
+    var prepColor = DeckColor(stored: UserDefaults.standard.string(forKey: "look.prep") ?? "") ?? .white {
         didSet { UserDefaults.standard.set(prepColor.rawValue, forKey: "look.prep") }
     }
 }
@@ -45,9 +45,14 @@ enum DeckColor: String, CaseIterable, Identifiable {
     case blue = "Blue", cyan = "Cyan", teal = "Teal", green = "Green", lime = "Lime", yellow = "Yellow",
          gold = "Gold", orange = "Orange", red = "Red", pink = "Pink", magenta = "Magenta", violet = "Violet"
     // Soft
-    case sky = "Sky", ice = "Ice", mint = "Mint", sage = "Sage", lemon = "Lemon", sand = "Sand",
-         peach = "Peach", coral = "Coral", rose = "Rose", lilac = "Lilac"
+    case sky = "Sky", ice = "Ice", mint = "Mint", sage = "Sage", lemon = "Lemon",
+         peach = "Peach", coral = "Coral", rose = "Rose", orchid = "Orchid", lilac = "Lilac"
     var id: String { rawValue }
+
+    /// A stored name; Sand (too close to Lemon) became Orchid.
+    init?(stored: String) {
+        self.init(rawValue: stored == "Sand" ? "Orchid" : stored)
+    }
 
     enum Group: String, CaseIterable, Identifiable {
         case neutrals = "Neutrals", vivid = "Vivid", soft = "Soft"
@@ -88,7 +93,7 @@ enum DeckColor: String, CaseIterable, Identifiable {
         case .mint: 0x9ff0c8
         case .sage: 0xb7d3a8
         case .lemon: 0xfff1a0
-        case .sand: 0xe8cfa0
+        case .orchid: 0xe9a8f7
         case .peach: 0xffc39e
         case .coral: 0xff9a8a
         case .rose: 0xffaec9

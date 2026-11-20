@@ -40,7 +40,7 @@ final class TrackMetaStore {
     func get(_ path: String) -> TrackMeta { meta[path] ?? TrackMeta() }
 
     /// The track's row colour, if one is picked.
-    func color(_ path: String) -> DeckColor? { meta[path]?.color.flatMap(DeckColor.init(rawValue:)) }
+    func color(_ path: String) -> DeckColor? { meta[path]?.color.flatMap(DeckColor.init(stored:)) }
 
     func update(_ paths: [String], _ change: (inout TrackMeta) -> Void) {
         for p in paths {
