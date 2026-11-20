@@ -108,7 +108,7 @@ struct WaveformLane: View {
         if let track = deck.track, !track.peaks.isEmpty {
             WaveformRenderer.draw(context, track: track, start: playhead - window / 2, span: window,
                                   rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
-                                  playhead: playhead, style: LookSettings.shared.waveStyle, monoColor: deck.color)
+                                  playhead: playhead, color: deck.color)
         } else {
             var centre = Path()
             centre.addRect(CGRect(x: 0, y: mid, width: size.width, height: 1))
@@ -144,7 +144,7 @@ struct TrackOverview: View {
                 let playedX = CGFloat(playhead / track.duration) * size.width
                 WaveformRenderer.draw(context, track: track, start: 0, span: track.duration,
                                       rect: CGRect(x: 0, y: 2, width: size.width, height: size.height - 4),
-                                      playhead: playhead, style: LookSettings.shared.waveStyle, monoColor: deck.color)
+                                      playhead: playhead, color: deck.color)
                 if deck.loopActive, deck.loopLength > 0 {
                     let a = CGFloat(deck.loopStart / track.duration) * size.width
                     let w = max(2, CGFloat(deck.loopLength / track.duration) * size.width)

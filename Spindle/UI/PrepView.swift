@@ -477,8 +477,6 @@ private struct PrepOverview: View {
 
     var body: some View {
         let duration = max(model.prepDuration, 1)
-        let style = LookSettings.shared.waveStyle
-        let _ = (LookSettings.shared.theme, LookSettings.shared.bandPalette, LookSettings.shared.deckAColor)
         ZStack {
             // The waveform only changes with the track: draw it once.
             Canvas { context, size in
@@ -490,7 +488,7 @@ private struct PrepOverview: View {
                 if let track = page.preview {
                     WaveformRenderer.draw(context, track: track, start: 0, span: duration,
                                           rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
-                                          playhead: 0, style: style, dimPlayed: false)
+                                          playhead: 0, dimPlayed: false)
                 }
                 for cue in prep.cues {
                     let x = CGFloat(cue.time / duration) * size.width
@@ -531,11 +529,9 @@ private struct PrepLane: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                let style = LookSettings.shared.waveStyle
-                let _ = (LookSettings.shared.theme, LookSettings.shared.bandPalette, LookSettings.shared.deckAColor)
                 TimelineView(.animation(paused: !page.playing)) { _ in
                     let t = model.prepPosition
-                    Canvas { context, size in draw(context, size, playhead: t, style: style) }
+                    Canvas { context, size in draw(context, size, playhead: t) }
                 }
                 WaveformInteraction(
                     onScroll: { model.prepScrub(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
@@ -561,7 +557,7 @@ private struct PrepLane: View {
         }
     }
 
-    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double, style: WaveStyle) {
+    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double) {
         let span = page.zoom
         let start = playhead - span / 2
         let secondsPerPoint = span / Double(size.width)
@@ -617,7 +613,7 @@ private struct PrepLane: View {
         if let track = page.preview {
             WaveformRenderer.draw(context, track: track, start: start, span: span,
                                   rect: CGRect(x: 0, y: laneTop + 4, width: size.width, height: laneHeight - 8),
-                                  playhead: playhead, style: style)
+                                  playhead: playhead)
         } else if let w = page.waveform {
             // The quick analysis waveform until the audio is decoded.
             var path = Path()

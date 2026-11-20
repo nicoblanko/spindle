@@ -2,82 +2,34 @@
 //  Theme.swift
 //  Spindle
 //
-//  Tokens from the Spindle style guide. Dark, flat, square; one orange accent
-//  used only for the active page, selection and playhead. "Darker" swaps the
-//  surfaces for near-black ones; everything else stays.
+//  Tokens: black and white, flat, square. White marks the active page,
+//  selection and playhead; each deck's colour (picked in the Colours panel)
+//  is the only colour.
 //
 
 import AppKit
 import Observation
 import SwiftUI
 
-/// Look settings you can change while the app runs: the colour theme and
-/// the waveform style. Views read them through `Theme`, so they redraw when
-/// one changes.
+/// Look settings you can change while the app runs: each deck's colour and
+/// whether the colour panel is open. Views read them through `Theme`, so
+/// they redraw when one changes.
 @Observable
 final class LookSettings {
     static let shared = LookSettings()
-
-    var theme: AppTheme = LookSettings.savedTheme {
-        didSet {
-            UserDefaults.standard.set(theme.rawValue, forKey: "look.theme")
-            LookFlags.saturation = theme.saturation
-        }
-    }
-
-    init() { LookFlags.saturation = theme.saturation }
 
     /// The colour panel on the right is open.
     var panelOpen = UserDefaults.standard.bool(forKey: "look.panel") {
         didSet { UserDefaults.standard.set(panelOpen, forKey: "look.panel") }
     }
 
-    private static var savedTheme: AppTheme {
-        if let raw = UserDefaults.standard.string(forKey: "look.theme"), let t = AppTheme(rawValue: raw) { return t }
-        return UserDefaults.standard.bool(forKey: "look.darker") ? .ink : .studio     // the old switch
-    }
-
-    var waveStyle = WaveStyle(rawValue: UserDefaults.standard.string(forKey: "look.wave") ?? "") ?? .threeBand {
-        didSet { UserDefaults.standard.set(waveStyle.rawValue, forKey: "look.wave") }
-    }
-    var bandPalette = BandPalette(rawValue: UserDefaults.standard.string(forKey: "look.bands") ?? "") ?? .classic {
-        didSet { UserDefaults.standard.set(bandPalette.rawValue, forKey: "look.bands") }
-    }
-    /// Each deck's colour: its Mono waveform, header and active controls.
-    /// Shown as picked in every theme, so the decks stay apart in Ink.
+    /// Each deck's colour: its waveforms, header and active controls. The
+    /// only colour in the black-and-white theme, so the decks stay apart.
     var deckAColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckA") ?? "") ?? .blue {
         didSet { UserDefaults.standard.set(deckAColor.rawValue, forKey: "look.deckA") }
     }
     var deckBColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckB") ?? "") ?? .orange {
         didSet { UserDefaults.standard.set(deckBColor.rawValue, forKey: "look.deckB") }
-    }
-}
-
-/// Colours for the 3-Band waveform: bass, mids, highs.
-enum BandPalette: String, CaseIterable, Identifiable {
-    case classic = "Classic", fire = "Fire", ice = "Ice", neon = "Neon", forest = "Forest", greys = "Greys"
-    var id: String { rawValue }
-
-    var hex: (low: UInt32, mid: UInt32, high: UInt32) {
-        switch self {
-        case .classic: (0x2b6fe0, 0xf0a033, 0xf4f4f6)
-        case .fire: (0xb8321f, 0xf08a24, 0xffe08a)
-        case .ice: (0x1d4f9c, 0x3fb6d9, 0xeaf7ff)
-        case .neon: (0x7a3cff, 0xff4fa3, 0xf4f4f6)
-        case .forest: (0x1f7a4d, 0x9ccc65, 0xf4f4f6)
-        case .greys: (0x4a4a4a, 0x9a9a9a, 0xf2f2f2)
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .classic: "blue, amber, white"
-        case .fire: "red, orange, yellow"
-        case .ice: "navy, cyan, white"
-        case .neon: "violet, pink, white"
-        case .forest: "green, lime, white"
-        case .greys: "dark, mid, light grey"
-        }
     }
 }
 
@@ -104,75 +56,24 @@ enum DeckColor: String, CaseIterable, Identifiable {
     var color: Color { Color(hex: hex, exact: true) }
 }
 
-/// The colour themes, from full colour to none.
-enum AppTheme: String, CaseIterable, Identifiable {
-    /// The original: dark grey panels, orange accent, full colour.
-    case studio = "Studio"
-    /// In between: darker panels, every colour toned halfway to grey.
-    case dusk = "Dusk"
-    /// Black and white: pure black, white, greys only.
-    case ink = "Ink"
-    var id: String { rawValue }
-
-    /// How much colour is kept (1 = all, 0 = greys).
-    var saturation: Double {
-        switch self {
-        case .studio: 1
-        case .dusk: 0.45
-        case .ink: 0
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .studio: "Original colours"
-        case .dusk: "Darker, muted colours"
-        case .ink: "Black and white"
-        }
-    }
-}
-
-/// Read by `Color(hex:)` from any thread, so it can't live on the main actor.
-nonisolated enum LookFlags {
-    nonisolated(unsafe) static var saturation = 1.0
-}
-
-/// How waveforms are coloured.
-enum WaveStyle: String, CaseIterable, Identifiable {
-    /// Bass, mids and highs as three layers (blue, amber, white).
-    case threeBand = "3-Band"
-    /// One shape, coloured by its sound: red bass, green mids, blue highs.
-    case rgb = "RGB"
-    /// One solid colour.
-    case mono = "Mono"
-    var id: String { rawValue }
-}
-
+/// Black and white: pure black surfaces, white text and greys in between.
+/// The deck colours are the only colour.
 enum Theme {
-    private static var t: AppTheme { LookSettings.shared.theme }
-    /// Studio, Dusk, Ink.
-    private static func pick(_ studio: UInt32, _ dusk: UInt32, _ ink: UInt32) -> Color {
-        switch t {
-        case .studio: Color(hex: studio)
-        case .dusk: Color(hex: dusk)
-        case .ink: Color(hex: ink)
-        }
-    }
-    static var bg: Color { pick(0x161618, 0x0e0e10, 0x000000) }
-    static var panel: Color { pick(0x1f1f22, 0x151517, 0x0a0a0a) }
-    static var panelRaised: Color { pick(0x2a2a2e, 0x1d1d20, 0x141414) }
-    static var control: Color { pick(0x35353a, 0x28282c, 0x1f1f1f) }
-    static var line: Color { pick(0x3e3e44, 0x2f2f34, 0x282828) }
-    static var ink: Color { pick(0xe2e2e4, 0xe6e6e8, 0xf2f2f2) }
+    static var bg: Color { Color(hex: 0x000000) }
+    static var panel: Color { Color(hex: 0x0a0a0a) }
+    static var panelRaised: Color { Color(hex: 0x141414) }
+    static var control: Color { Color(hex: 0x1f1f1f) }
+    static var line: Color { Color(hex: 0x282828) }
+    static var ink: Color { Color(hex: 0xf2f2f2) }
     static var inkMuted: Color { Color(hex: 0x9a9aa1) }
     static var inkFaint: Color { Color(hex: 0x6c6c73) }
-    static var accent: Color { pick(0xf08a24, 0xf08a24, 0xffffff) }
-    static var accentSoft: Color { pick(0x4a2f16, 0x3a2a1c, 0x2e2e2e) }
-    static var onAccent: Color { pick(0x161618, 0x0e0e10, 0x000000) }
+    static var accent: Color { Color(hex: 0xffffff) }
+    static var accentSoft: Color { Color(hex: 0x2e2e2e) }
+    static var onAccent: Color { Color(hex: 0x000000) }
     static var deckA: Color { LookSettings.shared.deckAColor.color }
     static var deckB: Color { LookSettings.shared.deckBColor.color }
-    static var match: Color { pick(0x5fd37a, 0x5fd37a, 0xc8c8c8) }
-    static var warn: Color { pick(0xff5a4f, 0xff5a4f, 0xffffff) }
+    static var match: Color { Color(hex: 0xc8c8c8) }
+    static var warn: Color { Color(hex: 0xffffff) }
     static var waveLow: Color { Color(hex: 0x3d6fb3) }
     static var waveMid: Color { Color(hex: 0xa8b4c4) }
     static var waveHigh: Color { Color(hex: 0xeef2f7) }
@@ -207,12 +108,11 @@ enum Theme {
 }
 
 extension Color {
-    /// Every colour is pulled towards the grey of its brightness as far as
-    /// the theme asks: not at all in Studio, halfway in Dusk, fully in Ink.
-    /// `exact`: show this colour as it is in every theme (a colour you picked).
+    /// Every colour becomes the grey of its brightness (the theme is black
+    /// and white), except `exact` ones: the deck colours you picked.
     nonisolated init(hex: UInt32, exact: Bool = false) {
         let r = Double((hex >> 16) & 0xff) / 255, g = Double((hex >> 8) & 0xff) / 255, b = Double(hex & 0xff) / 255
-        let k = exact ? 1 : LookFlags.saturation
+        let k = exact ? 1.0 : 0     // black and white, except the deck colours
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
         self.init(.sRGB, red: y + (r - y) * k, green: y + (g - y) * k, blue: y + (b - y) * k)
     }

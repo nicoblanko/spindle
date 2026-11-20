@@ -112,15 +112,11 @@ extension ContentView {
         }
         guard let dir = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT"] else { return }
         let original = model.page
-        // SPINDLE_LOOK=rgb|3-band|mono[,dusk|,ink]: snapshot in that look, then restore yours.
+        // SPINDLE_LOOK=panel: snapshot with the colour panel open, then restore.
         let look = LookSettings.shared
-        let savedLook = (look.theme, look.waveStyle, look.panelOpen)
-        if let spec = ProcessInfo.processInfo.environment["SPINDLE_LOOK"]?.lowercased() {
-            look.panelOpen = spec.contains("panel")
-            look.theme = spec.contains("ink") || spec.contains("darker") ? .ink : spec.contains("dusk") ? .dusk : .studio
-            look.waveStyle = spec.contains("rgb") ? .rgb : spec.contains("mono") ? .mono : .threeBand
-        }
-        defer { look.theme = savedLook.0; look.waveStyle = savedLook.1; look.panelOpen = savedLook.2 }
+        let savedPanel = look.panelOpen
+        if let spec = ProcessInfo.processInfo.environment["SPINDLE_LOOK"]?.lowercased() { look.panelOpen = spec.contains("panel") }
+        defer { look.panelOpen = savedPanel }
         try? await Task.sleep(for: .seconds(4))
         let tracks = model.library.tracks
         // Speed check: building the Organize list with the current view.
