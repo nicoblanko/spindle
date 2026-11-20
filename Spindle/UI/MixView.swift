@@ -37,12 +37,21 @@ struct MixView: View {
                     SharedTrackList(model: model, library: library, key: "mix",
                                     selection: Binding(get: { model.mixSelection }, set: { model.mixSelection = $0 }),
                                     dimmed: dimUnfit ? { !fits($0.id) } : nil,
-                                    trailing: AnyView(
+                                    played: { model.playedURLs.contains($0.id) },
+                                    trailing: AnyView(HStack(spacing: Theme.space2) {
+                                        if !model.playedURLs.isEmpty {
+                                            Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(Theme.inkMuted)
+                                            Text("Played \(model.playedURLs.count)").font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                                            Button("Reset") { model.resetPlayed() }
+                                                .buttonStyle(SmallButtonStyle())
+                                                .help("Start a fresh played list, e.g. for a new set")
+                                        }
                                         Toggle("Dim what doesn't fit", isOn: $dimUnfit)
                                             .toggleStyle(.checkbox)
                                             .font(Theme.caption)
                                             .foregroundStyle(Theme.inkMuted)
-                                            .help("Grey out tracks whose key or tempo doesn't fit a playing deck")))
+                                            .help("Grey out tracks whose key or tempo doesn't fit a playing deck")
+                                    }))
                     Rectangle().fill(Theme.line).frame(height: 1)
                     LoadBar(model: model, fits: fits)
                 }

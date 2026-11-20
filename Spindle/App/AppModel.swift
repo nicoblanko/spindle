@@ -148,6 +148,11 @@ final class AppModel {
     var deckCards: [StackItem?] = [nil, nil]
     /// Cards already played this session, newest first.
     var played: [StackItem] = []
+    /// Tracks a deck has played forward for 20 s or more since Spindle
+    /// opened (or since Reset): ticked off in the Mix list.
+    var playedURLs: Set<URL> = []
+    /// Seconds each track has played, until it counts as played.
+    var playSeconds: [URL: Double] = [:]
     /// Mix page: selected tab (playlist id, or "all") and each tab's view.
     var mixTab: String = UserDefaults.standard.string(forKey: "mix.tab") ?? "all" {
         didSet { UserDefaults.standard.set(mixTab, forKey: "mix.tab") }

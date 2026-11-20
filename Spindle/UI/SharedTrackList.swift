@@ -39,6 +39,7 @@ struct SharedTrackList: View {
     var selection: Binding<Set<URL>>
     var onOpen: ((Record) -> Void)? = nil
     var dimmed: ((Record) -> Bool)? = nil
+    var played: ((Record) -> Bool)? = nil
     var nameWidth: CGFloat = 300
     /// Extra controls at the right of the toolbar.
     var trailing: AnyView? = nil
@@ -63,6 +64,7 @@ struct SharedTrackList: View {
                        selection: selection,
                        onOpen: onOpen,
                        dimmed: dimmed,
+                       played: played,
                        nameWidth: nameWidth)
         }
         .background(Theme.panel)

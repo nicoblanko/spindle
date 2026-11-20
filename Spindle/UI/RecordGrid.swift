@@ -25,6 +25,8 @@ struct RecordGrid: View {
     var onOpen: ((Record) -> Void)? = nil
     /// Rows drawn greyed (e.g. already in the open set).
     var dimmed: ((Record) -> Bool)? = nil
+    /// Ticked off: played already (Mix).
+    var played: ((Record) -> Bool)? = nil
     /// Width of the Track column (narrower on Prep).
     var nameWidth: CGFloat = 300
     @State private var anchor: URL?
@@ -320,7 +322,13 @@ struct RecordGrid: View {
         case .name:
             HStack(spacing: 4) {
                 if mixes(r) { Circle().fill(Theme.match).frame(width: 6, height: 6) }
-                Text(r.track.name).font(Theme.body).foregroundStyle(dimmed?(r) == true ? Theme.inkFaint : Theme.ink).lineLimit(1)
+                let wasPlayed = played?(r) == true
+                if wasPlayed {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Theme.inkMuted)
+                        .help("Played this session")
+                }
+                Text(r.track.name).font(Theme.body)
+                    .foregroundStyle(wasPlayed || dimmed?(r) == true ? Theme.inkFaint : Theme.ink).lineLimit(1)
             }
         case .folder:
             Text(r.track.crate).font(Theme.body).foregroundStyle(Theme.inkMuted).lineLimit(1)

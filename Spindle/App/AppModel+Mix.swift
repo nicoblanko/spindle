@@ -541,11 +541,23 @@ extension AppModel {
                     if deck.playing != playing { deck.playing = playing }
                     let rounded = (t.pitch * 1000).rounded() / 1000
                     if abs(deck.pitch - rounded) > 0.002 { deck.pitch = rounded }
+                    // 20 s of forward play marks a track as played.
+                    if playing, let url = deck.track?.url, !self.playedURLs.contains(url) {
+                        let s = (self.playSeconds[url] ?? 0) + 0.25
+                        self.playSeconds[url] = s
+                        if s >= 20 { self.playedURLs.insert(url) }
+                    }
                 }
                 self.sessions.tick(model: self)
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
+    }
+
+    /// Starts a fresh played list (a new set).
+    func resetPlayed() {
+        playedURLs = []
+        playSeconds = [:]
     }
 
     /// Records the mixer's master send when the hardware has one (the Xone's
