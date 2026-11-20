@@ -38,8 +38,13 @@ final class LookSettings {
     var bandPalette = BandPalette(rawValue: UserDefaults.standard.string(forKey: "look.bands") ?? "") ?? .classic {
         didSet { UserDefaults.standard.set(bandPalette.rawValue, forKey: "look.bands") }
     }
-    var monoColor = MonoColor(rawValue: UserDefaults.standard.string(forKey: "look.mono") ?? "") ?? .deck {
-        didSet { UserDefaults.standard.set(monoColor.rawValue, forKey: "look.mono") }
+    /// Each deck's colour: its Mono waveform, header and active controls.
+    /// Shown as picked in every theme, so the decks stay apart in Ink.
+    var deckAColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckA") ?? "") ?? .blue {
+        didSet { UserDefaults.standard.set(deckAColor.rawValue, forKey: "look.deckA") }
+    }
+    var deckBColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckB") ?? "") ?? .orange {
+        didSet { UserDefaults.standard.set(deckBColor.rawValue, forKey: "look.deckB") }
     }
 }
 
@@ -71,26 +76,27 @@ enum BandPalette: String, CaseIterable, Identifiable {
     }
 }
 
-/// The colour of the Mono waveform.
-enum MonoColor: String, CaseIterable, Identifiable {
-    case deck = "Deck colour", white = "White", silver = "Silver", orange = "Orange", blue = "Blue",
-         cyan = "Cyan", green = "Green", pink = "Pink", violet = "Violet"
+/// A deck's colour.
+enum DeckColor: String, CaseIterable, Identifiable {
+    case white = "White", silver = "Silver", blue = "Blue", cyan = "Cyan", green = "Green",
+         yellow = "Yellow", orange = "Orange", red = "Red", pink = "Pink", violet = "Violet"
     var id: String { rawValue }
 
-    /// Nil: each deck's own colour.
-    var hex: UInt32? {
+    var hex: UInt32 {
         switch self {
-        case .deck: nil
         case .white: 0xffffff
         case .silver: 0x9aa0a8
-        case .orange: 0xf08a24
         case .blue: 0x4fa3ff
         case .cyan: 0x3fd0e0
         case .green: 0x5fd37a
+        case .yellow: 0xf2d13c
+        case .orange: 0xf08a24
+        case .red: 0xff5a4f
         case .pink: 0xff6fa8
         case .violet: 0x9b7bd9
         }
     }
+    var color: Color { Color(hex: hex, exact: true) }
 }
 
 /// The colour themes, from full colour to none.
@@ -158,8 +164,8 @@ enum Theme {
     static var accent: Color { pick(0xf08a24, 0xf08a24, 0xffffff) }
     static var accentSoft: Color { pick(0x4a2f16, 0x3a2a1c, 0x2e2e2e) }
     static var onAccent: Color { pick(0x161618, 0x0e0e10, 0x000000) }
-    static var deckA: Color { pick(0x4fa3ff, 0x4fa3ff, 0xe8e8e8) }
-    static var deckB: Color { pick(0xc06a2b, 0xc06a2b, 0x8a8a8a) }
+    static var deckA: Color { LookSettings.shared.deckAColor.color }
+    static var deckB: Color { LookSettings.shared.deckBColor.color }
     static var match: Color { pick(0x5fd37a, 0x5fd37a, 0xc8c8c8) }
     static var warn: Color { pick(0xff5a4f, 0xff5a4f, 0xffffff) }
     static var waveLow: Color { Color(hex: 0x3d6fb3) }

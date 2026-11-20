@@ -81,17 +81,17 @@ struct WaveformLane: View {
             for (n, loop) in prep.loops.enumerated() {
                 let a = lx(loop.start), b = lx(loop.start + Double(loop.beats) * prep.beatSeconds)
                 guard b > 0, a < size.width else { continue }
-                context.fill(Path(CGRect(x: a, y: size.height - 4, width: max(1, b - a), height: 4)), with: .color(Theme.match.opacity(0.55)))
-                context.draw(Text("L\(n + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.match),
+                context.fill(Path(CGRect(x: a, y: size.height - 4, width: max(1, b - a), height: 4)), with: .color(deck.color.opacity(0.55)))
+                context.draw(Text("L\(n + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(deck.color),
                              at: CGPoint(x: a + 3, y: size.height - 6), anchor: .bottomLeading)
             }
         }
         if deck.loopActive, deck.loopLength > 0 {
             let a = lx(deck.loopStart), b = lx(deck.loopStart + deck.loopLength)
-            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(Theme.match.opacity(0.14)))
-            context.fill(Path(CGRect(x: a, y: 0, width: 2, height: size.height)), with: .color(Theme.match))
-            context.fill(Path(CGRect(x: b - 2, y: 0, width: 2, height: size.height)), with: .color(Theme.match))
-            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(Theme.match))
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(deck.color.opacity(0.14)))
+            context.fill(Path(CGRect(x: a, y: 0, width: 2, height: size.height)), with: .color(deck.color))
+            context.fill(Path(CGRect(x: b - 2, y: 0, width: 2, height: size.height)), with: .color(deck.color))
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(deck.color))
         }
 
         // Second ticks so movement is readable before a grid exists.
@@ -148,7 +148,7 @@ struct TrackOverview: View {
                 if deck.loopActive, deck.loopLength > 0 {
                     let a = CGFloat(deck.loopStart / track.duration) * size.width
                     let w = max(2, CGFloat(deck.loopLength / track.duration) * size.width)
-                    context.fill(Path(CGRect(x: a, y: 0, width: w, height: size.height)), with: .color(Theme.match.opacity(0.35)))
+                    context.fill(Path(CGRect(x: a, y: 0, width: w, height: size.height)), with: .color(deck.color.opacity(0.35)))
                 }
                 var head = Path()
                 head.addRect(CGRect(x: min(max(playedX, 0), size.width) - 1, y: 0, width: 2, height: size.height))

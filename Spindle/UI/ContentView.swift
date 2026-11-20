@@ -444,8 +444,11 @@ private struct LookMenu: View {
             Picker("3-Band colours", selection: $look.bandPalette) {
                 ForEach(BandPalette.allCases) { p in Text("\(p.rawValue) — \(p.summary)").tag(p) }
             }
-            Picker("Mono colour", selection: $look.monoColor) {
-                ForEach(MonoColor.allCases) { Text($0.rawValue).tag($0) }
+            Picker("Deck A colour", selection: $look.deckAColor) {
+                ForEach(DeckColor.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Picker("Deck B colour", selection: $look.deckBColor) {
+                ForEach(DeckColor.allCases) { Text($0.rawValue).tag($0) }
             }
         } label: {
             Image(systemName: "circle.lefthalf.filled")

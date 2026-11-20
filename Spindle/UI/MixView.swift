@@ -46,6 +46,8 @@ struct MixView: View {
                     Rectangle().fill(Theme.line).frame(height: 1)
                     LoadBar(model: model, fits: fits)
                 }
+                DeckColorPanel(look: LookSettings.shared)
+                    .frame(width: 176)
             }
             .background(Theme.line)
             .frame(maxHeight: .infinity)
@@ -63,6 +65,51 @@ struct MixView: View {
             if model.laptop {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 LaptopMixer(model: model)
+            }
+        }
+    }
+}
+
+/// Deck colours, on the go: a swatch row per deck and the waveform style.
+private struct DeckColorPanel: View {
+    @Bindable var look: LookSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.space3) {
+            LabelText("Deck colours")
+            row("A", selection: $look.deckAColor)
+            row("B", selection: $look.deckBColor)
+            LabelText("Waveform")
+            Picker("", selection: $look.waveStyle) {
+                Text("Mono").tag(WaveStyle.mono)
+                Text("3-Band").tag(WaveStyle.threeBand)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.space3)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.panel)
+    }
+
+    private func row(_ label: String, selection: Binding<DeckColor>) -> some View {
+        HStack(alignment: .top, spacing: Theme.space2) {
+            Text(label).font(Theme.label).foregroundStyle(selection.wrappedValue.color).frame(width: 12)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(20), spacing: 4), count: 5), spacing: 4) {
+                ForEach(DeckColor.allCases) { c in
+                    let on = selection.wrappedValue == c
+                    Button { selection.wrappedValue = c } label: {
+                        RoundedRectangle(cornerRadius: Theme.radiusSm)
+                            .fill(c.color)
+                            .frame(width: 20, height: 20)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
+                                .stroke(on ? Theme.ink : Color.clear, lineWidth: 2)
+                                .padding(-3))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Deck \(label): \(c.rawValue)")
+                }
             }
         }
     }
@@ -221,7 +268,7 @@ private struct DeckPerformance: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(on ? Theme.onAccent : Theme.ink)
                             .frame(width: 28, height: 22)
-                            .background(on ? Theme.match : Theme.control)
+                            .background(on ? deck.color : Theme.control)
                     }
                     .buttonStyle(.plain)
                     .disabled(deck.track == nil)
@@ -253,10 +300,10 @@ private struct DeckPerformance: View {
                                     Text(SavedLoop.barLabel(loop.bars)).font(Theme.readoutSm)
                                         .foregroundStyle(on ? Theme.onAccent : Theme.inkMuted)
                                 }
-                                .foregroundStyle(on ? Theme.onAccent : Theme.match)
+                                .foregroundStyle(on ? Theme.onAccent : deck.color)
                                 .padding(.horizontal, 6)
                                 .frame(height: 22)
-                                .background(on ? Theme.match : Theme.control)
+                                .background(on ? deck.color : Theme.control)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
                             }
                             .buttonStyle(.plain)

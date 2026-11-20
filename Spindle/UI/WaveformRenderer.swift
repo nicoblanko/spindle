@@ -10,7 +10,7 @@
 //            hi-hats each read at a glance
 //    RGB     one shape, coloured by what it sounds like: red where the bass
 //            dominates, green for mids, blue for highs
-//    Mono    one solid colour: the deck's own, or one you pick
+//    Mono    one solid colour: the deck's colour (Prep: the text colour)
 //
 //  Columns are one screen pixel wide and fixed to the track's timeline, so
 //  the shape stays put as it scrolls.
@@ -26,7 +26,7 @@ enum WaveformRenderer {
     /// Draws seconds `start` … `start + span` of `track` into `rect`.
     /// Everything before `playhead` is drawn dimmer.
     static func draw(_ context: GraphicsContext, track: LoadedTrack, start: Double, span: Double,
-                     rect: CGRect, playhead: Double, style: WaveStyle, monoColor: Color = Theme.waveLow,
+                     rect: CGRect, playhead: Double, style: WaveStyle, monoColor: Color = Theme.ink,
                      dimPlayed: Bool = true) {
         let peaks = track.peaks
         guard !peaks.isEmpty, span > 0, rect.width > 1 else { return }
@@ -42,8 +42,6 @@ enum WaveformRenderer {
         let half = rect.height / 2
         let hasBands = track.low.count == peaks.count
         let style = hasBands ? style : .mono
-        // A colour you picked shows as itself, even in Dusk and Ink.
-        let monoColor = LookSettings.shared.monoColor.hex.map { Color(hex: $0, exact: true) } ?? monoColor
 
         func pixel(_ t: Double) -> CGFloat {
             ((rect.minX + CGFloat((t - start) / span) * rect.width) * scale).rounded()
