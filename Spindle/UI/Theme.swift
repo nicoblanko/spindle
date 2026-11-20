@@ -35,6 +35,62 @@ final class LookSettings {
     var waveStyle = WaveStyle(rawValue: UserDefaults.standard.string(forKey: "look.wave") ?? "") ?? .threeBand {
         didSet { UserDefaults.standard.set(waveStyle.rawValue, forKey: "look.wave") }
     }
+    var bandPalette = BandPalette(rawValue: UserDefaults.standard.string(forKey: "look.bands") ?? "") ?? .classic {
+        didSet { UserDefaults.standard.set(bandPalette.rawValue, forKey: "look.bands") }
+    }
+    var monoColor = MonoColor(rawValue: UserDefaults.standard.string(forKey: "look.mono") ?? "") ?? .deck {
+        didSet { UserDefaults.standard.set(monoColor.rawValue, forKey: "look.mono") }
+    }
+}
+
+/// Colours for the 3-Band waveform: bass, mids, highs.
+enum BandPalette: String, CaseIterable, Identifiable {
+    case classic = "Classic", fire = "Fire", ice = "Ice", neon = "Neon", forest = "Forest", greys = "Greys"
+    var id: String { rawValue }
+
+    var hex: (low: UInt32, mid: UInt32, high: UInt32) {
+        switch self {
+        case .classic: (0x2b6fe0, 0xf0a033, 0xf4f4f6)
+        case .fire: (0xb8321f, 0xf08a24, 0xffe08a)
+        case .ice: (0x1d4f9c, 0x3fb6d9, 0xeaf7ff)
+        case .neon: (0x7a3cff, 0xff4fa3, 0xf4f4f6)
+        case .forest: (0x1f7a4d, 0x9ccc65, 0xf4f4f6)
+        case .greys: (0x4a4a4a, 0x9a9a9a, 0xf2f2f2)
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .classic: "blue, amber, white"
+        case .fire: "red, orange, yellow"
+        case .ice: "navy, cyan, white"
+        case .neon: "violet, pink, white"
+        case .forest: "green, lime, white"
+        case .greys: "dark, mid, light grey"
+        }
+    }
+}
+
+/// The colour of the Mono waveform.
+enum MonoColor: String, CaseIterable, Identifiable {
+    case deck = "Deck colour", white = "White", silver = "Silver", orange = "Orange", blue = "Blue",
+         cyan = "Cyan", green = "Green", pink = "Pink", violet = "Violet"
+    var id: String { rawValue }
+
+    /// Nil: each deck's own colour.
+    var hex: UInt32? {
+        switch self {
+        case .deck: nil
+        case .white: 0xeeeeee
+        case .silver: 0x9aa0a8
+        case .orange: 0xf08a24
+        case .blue: 0x4fa3ff
+        case .cyan: 0x3fd0e0
+        case .green: 0x5fd37a
+        case .pink: 0xff6fa8
+        case .violet: 0x9b7bd9
+        }
+    }
 }
 
 /// The colour themes, from full colour to none.

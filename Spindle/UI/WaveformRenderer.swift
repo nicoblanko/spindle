@@ -6,11 +6,11 @@
 //  and lane, Mix overview and lanes), in the style chosen in the look menu:
 //
 //    3-Band  bass, mids and highs as three layers on top of each other
-//            (blue, amber, white), so a kick, a bassline and hi-hats each
-//            read at a glance
+//            (colours from the chosen palette), so a kick, a bassline and
+//            hi-hats each read at a glance
 //    RGB     one shape, coloured by what it sounds like: red where the bass
 //            dominates, green for mids, blue for highs
-//    Mono    one colour, loudness inside the peaks
+//    Mono    one solid colour: the deck's own, or one you pick
 //
 //  Columns are one screen pixel wide and fixed to the track's timeline, so
 //  the shape stays put as it scrolls.
@@ -19,9 +19,9 @@
 import SwiftUI
 
 enum WaveformRenderer {
-    static var lowColor: Color { Color(hex: 0x2b6fe0) }
-    static var midColor: Color { Color(hex: 0xf0a033) }
-    static var highColor: Color { Color(hex: 0xf4f4f6) }
+    static var lowColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.low) }
+    static var midColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.mid) }
+    static var highColor: Color { Color(hex: LookSettings.shared.bandPalette.hex.high) }
 
     /// Draws seconds `start` … `start + span` of `track` into `rect`.
     /// Everything before `playhead` is drawn dimmer.
@@ -42,6 +42,7 @@ enum WaveformRenderer {
         let half = rect.height / 2
         let hasBands = track.low.count == peaks.count
         let style = hasBands ? style : .mono
+        let monoColor = LookSettings.shared.monoColor.hex.map { Color(hex: $0) } ?? monoColor
 
         func pixel(_ t: Double) -> CGFloat {
             ((rect.minX + CGFloat((t - start) / span) * rect.width) * scale).rounded()

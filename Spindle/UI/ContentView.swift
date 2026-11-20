@@ -440,6 +440,13 @@ private struct LookMenu: View {
                 ForEach(WaveStyle.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.inline)
+            Divider()
+            Picker("3-Band colours", selection: $look.bandPalette) {
+                ForEach(BandPalette.allCases) { p in Text("\(p.rawValue) — \(p.summary)").tag(p) }
+            }
+            Picker("Mono colour", selection: $look.monoColor) {
+                ForEach(MonoColor.allCases) { Text($0.rawValue).tag($0) }
+            }
         } label: {
             Image(systemName: "circle.lefthalf.filled")
         }
