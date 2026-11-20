@@ -13,7 +13,9 @@ import Observation
 nonisolated struct TrackMeta: Codable, Sendable, Equatable {
     var rating = 0
     var notes = ""
-    var isEmpty: Bool { rating == 0 && notes.isEmpty }
+    /// The row's colour (a soft DeckColor name), picked in the Colour column.
+    var color: String?
+    var isEmpty: Bool { rating == 0 && notes.isEmpty && color == nil }
 }
 
 @Observable
@@ -36,6 +38,9 @@ final class TrackMetaStore {
     }
 
     func get(_ path: String) -> TrackMeta { meta[path] ?? TrackMeta() }
+
+    /// The track's row colour, if one is picked.
+    func color(_ path: String) -> DeckColor? { meta[path]?.color.flatMap(DeckColor.init(rawValue:)) }
 
     func update(_ paths: [String], _ change: (inout TrackMeta) -> Void) {
         for p in paths {

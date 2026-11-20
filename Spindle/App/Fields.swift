@@ -149,18 +149,18 @@ final class FieldStore {
 
 /// Any column of the grid.
 nonisolated enum FieldRef: Hashable, Codable, Sendable {
-    case name, folder, bpm, key, mood, energy, intro, outro, length, tempoGroup, tags, mixReady
+    case name, folder, bpm, key, mood, energy, intro, outro, length, tempoGroup, tags, mixReady, color
     case custom(UUID)
     /// Grid-only columns: the listen player and the row number.
     case listen, index
 
     static let gridOnly: [FieldRef] = [.listen, .index]
-    static let builtins: [FieldRef] = [.name, .folder, .bpm, .key, .mood, .energy, .tags, .mixReady, .tempoGroup, .intro, .outro, .length]
+    static let builtins: [FieldRef] = [.name, .folder, .bpm, .key, .mood, .energy, .tags, .mixReady, .tempoGroup, .intro, .outro, .length, .color]
 
     /// Read-only fields (computed by analysis), shown with a lock.
     var locked: Bool {
         switch self {
-        case .tags, .mixReady, .custom: false
+        case .tags, .mixReady, .custom, .color: false
         default: true
         }
     }
@@ -294,6 +294,7 @@ struct RecordContext {
     let library: LibraryModel
     let fields: FieldStore
     let prep: PrepStore
+    let meta: TrackMetaStore
 
     var tags: TagStore { library.tags }
 
@@ -311,6 +312,7 @@ struct RecordContext {
         case .tempoGroup: "Tempo group"
         case .tags: "Tags"
         case .mixReady: "Marked"
+        case .color: "Colour"
         case .listen: "Listen"
         case .index: "#"
         case .custom(let id): fields.field(id)?.name ?? "Field"
@@ -321,7 +323,7 @@ struct RecordContext {
         switch ref {
         case .name, .folder, .listen: .text
         case .bpm, .energy, .length, .index: .number
-        case .key, .mood, .intro, .outro, .tempoGroup: .select
+        case .key, .mood, .intro, .outro, .tempoGroup, .color: .select
         case .tags: .multi
         case .mixReady: .checkbox
         case .custom(let id):
@@ -408,6 +410,8 @@ struct RecordContext {
             return tags.tempoGroups.map { OptionInfo(id: $0.id.uuidString, name: $0.name, color: $0.color) }
         case .tags:
             return tags.manualTags.map { OptionInfo(id: $0.id.uuidString, name: $0.name, color: $0.color) }
+        case .color:
+            return DeckColor.Group.soft.colors.map { OptionInfo(id: $0.rawValue, name: $0.rawValue, color: $0.color) }
         case .custom(let id):
             return (fields.field(id)?.options ?? []).map { OptionInfo(id: $0.id.uuidString, name: $0.name, color: $0.color) }
         default:
@@ -427,6 +431,8 @@ struct RecordContext {
             return tags.tempoGroups.filter { $0.rule?.matches(a) == true }.map(\.id.uuidString)
         case .tags:
             return tags.manualTags(for: r.path).map(\.id.uuidString)
+        case .color:
+            return meta.color(r.path).map { [$0.rawValue] } ?? []
         case .custom(let id):
             guard case .options(let ids)? = fields.value(r.path, id), let field = fields.field(id) else { return [] }
             // Option order, as Airtable shows them.

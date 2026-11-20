@@ -141,7 +141,7 @@ final class AppModel {
     var organizeView = ViewSettings.load() {
         didSet { organizeView.save() }
     }
-    var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep) }
+    var records: RecordContext { RecordContext(library: library, fields: fields, prep: prep, meta: meta) }
     /// The Mix page's queue ("Up next"), remembered between launches.
     var stack: [StackItem] = StackItem.load() {
         didSet { StackItem.save(stack) }

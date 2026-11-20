@@ -82,6 +82,7 @@ struct RecordGrid: View {
         case .bpm: 58
         case .key: 86
         case .mood: 70
+        case .color: 64
         case .energy: 70
         case .tags: 210
         case .mixReady: 74
@@ -343,7 +344,14 @@ struct RecordGrid: View {
             Spacer(minLength: 0)
         }
         .frame(height: 30)
-        .background(isSelected ? Theme.accentSoft : Theme.panel)
+        .background {
+            ZStack {
+                Theme.panel
+                if let c = context.meta.color(r.path) { c.color.opacity(isSelected ? 0.45 : 0.28) }
+                else if isSelected { Theme.accentSoft }
+                if isSelected { Rectangle().strokeBorder(Theme.ink.opacity(0.5), lineWidth: 1) }
+            }
+        }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.5)).frame(height: 1) }
         .contentShape(Rectangle())
         // Select on the first click straight away; a second click opens.
@@ -407,6 +415,11 @@ struct RecordGrid: View {
             }
         case .energy:
             EnergyBar(energy: r.analysis?.energy ?? 0)
+        case .color:
+            RowColorButton(color: context.meta.color(r.path)) { picked in
+                let paths = selected.contains(r.id) ? selected.map(\.path) : [r.path]
+                context.meta.update(paths) { $0.color = picked?.rawValue }
+            }
         case .intro:
             Text(r.analysis?.intro.rawValue ?? "").font(Theme.body).foregroundStyle(Theme.inkMuted)
         case .outro:
@@ -588,5 +601,46 @@ private struct TextCell: View {
         }
         .font(numeric ? Theme.readoutSm : Theme.body)
         .foregroundStyle(Theme.ink)
+    }
+}
+
+
+/// A track's row colour: a swatch that opens the soft colours (and none).
+struct RowColorButton: View {
+    let color: DeckColor?
+    let onPick: (DeckColor?) -> Void
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            RoundedRectangle(cornerRadius: Theme.radiusSm)
+                .fill(color?.color ?? Color.clear)
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(color == nil ? Theme.inkFaint.opacity(0.35) : Color.clear, style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
+                .frame(width: 14, height: 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Row colour")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 6), spacing: 6) {
+                Button { onPick(nil); open = false } label: {
+                    RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.inkFaint)
+                        .overlay(Image(systemName: "xmark").font(.system(size: 9)).foregroundStyle(Theme.inkMuted))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain).help("No colour")
+                ForEach(DeckColor.Group.soft.colors) { c in
+                    Button { onPick(c); open = false } label: {
+                        RoundedRectangle(cornerRadius: Theme.radiusSm).fill(c.color)
+                            .frame(width: 22, height: 22)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
+                                .stroke(color == c ? Theme.ink : Color.clear, lineWidth: 2).padding(-3))
+                    }
+                    .buttonStyle(.plain).help(c.rawValue)
+                }
+            }
+            .padding(Theme.space3)
+        }
     }
 }
