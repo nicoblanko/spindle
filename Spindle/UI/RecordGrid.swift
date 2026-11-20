@@ -33,6 +33,8 @@ struct RecordGrid: View {
     /// The listen column's cell (Organize); without it there's no such column.
     var listen: ((Record) -> AnyView)? = nil
     var listenWidth: CGFloat = 0
+    /// Row to keep scrolled into view (the keyboard's place).
+    var follow: URL? = nil
     /// Width of the Track column (narrower on Prep).
     var nameWidth: CGFloat = 300
     @State private var anchor: URL?
@@ -118,6 +120,7 @@ struct RecordGrid: View {
                 VStack(spacing: 0) {
                     header
                     Rectangle().fill(Theme.line).frame(height: 1)
+                    ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             if let groups {
@@ -131,6 +134,10 @@ struct RecordGrid: View {
                         }
                         // Rebuild rows when the columns change, so no row keeps an old layout.
                         .id(columns.map { "\($0)" }.joined(separator: "|"))
+                    }
+                    .onChange(of: follow) { _, url in
+                        if let url { proxy.scrollTo(url) }
+                    }
                     }
                 }
                 .frame(width: max(totalWidth, geo.size.width), height: geo.size.height, alignment: .topLeading)

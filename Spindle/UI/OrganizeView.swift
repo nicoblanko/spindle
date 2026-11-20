@@ -54,6 +54,7 @@ struct OrganizeView: View {
         Binding(get: { model.organizeSelection }, set: { model.organizeSelection = $0 })
     }
     @State private var dropTargeted = false
+    @State private var keys = OrganizeKeys()
     @State private var showFilter = false
     @State private var showGroup = false
     @State private var naming: Naming?
@@ -92,7 +93,15 @@ struct OrganizeView: View {
                 .frame(width: 320)
         }
         .background(Theme.line)
-        .onDisappear { model.prepSetPlaying(false) }
+        .onAppear {
+            keys.install(model)
+            // Don't start with the cursor in the search field.
+            DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
+        }
+        .onDisappear {
+            keys.remove()
+            model.prepSetPlaying(false)
+        }
     }
 
     private var toolbar: some View {
@@ -243,6 +252,10 @@ struct OrganizeView: View {
 
     private var grid: some View {
         let recs = records
+        let view = model.organizeView
+        let _ = keys.order = (view.groupBy.map { by in
+            model.records.group(recs, by: by).filter { !view.collapsed.contains($0.id) }.flatMap(\.records)
+        } ?? recs).map(\.id)
         return RecordGrid(
             model: model,
             records: recs,
@@ -251,7 +264,8 @@ struct OrganizeView: View {
             menu: { AnyView(contextMenu($0)) },
             dimmed: dimmedInSet,
             listen: { AnyView(ListenCell(model: model, url: $0.track.url)) },
-            listenWidth: ListenCell.width)
+            listenWidth: ListenCell.width,
+            follow: keys.follow)
         .overlay {
             if dropTargeted { Rectangle().strokeBorder(Theme.accent, lineWidth: 2) }
         }
@@ -1024,5 +1038,64 @@ private struct MiniWaveform: View {
             played.fill(loud, with: .color(Theme.prep))
             context.fill(Path(CGRect(x: px - 0.5, y: 0, width: 1, height: size.height)), with: .color(Theme.accent))
         }
+    }
+}
+
+/// Organize's keys, while the page is open and no text field has focus:
+/// ↑ ↓ move through the list, space plays or stops the selected track,
+/// ← → skip 10 seconds.
+@Observable
+final class OrganizeKeys {
+    /// The row to keep in view (moved to with the arrow keys).
+    var follow: URL?
+    /// Rows in display order, refreshed on every redraw.
+    @ObservationIgnored var order: [URL] = []
+    @ObservationIgnored private var monitor: Any?
+
+    func install(_ model: AppModel) {
+        remove()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak model] event in
+            guard let self, let model, self.handle(event, model) else { return event }
+            return nil
+        }
+    }
+
+    func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+
+    private func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
+        // Typing in a field keeps its keys, except space in an empty field
+        // and Escape, which hand the keys back.
+        if let text = event.window?.firstResponder as? NSText {
+            guard event.keyCode == 53 || (event.keyCode == 49 && text.string.isEmpty) else { return false }
+            event.window?.makeFirstResponder(nil)
+            if event.keyCode == 53 { return true }
+        }
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
+        guard flags.isEmpty else { return false }
+        let selection = model.organizeSelection
+        // The row the keys act on: the one moved to last, else the first selected.
+        let current = follow.flatMap { selection.contains($0) ? $0 : nil } ?? order.first(where: selection.contains)
+
+        switch event.keyCode {
+        case 125, 126:                                    // ↓ ↑
+            guard !order.isEmpty else { return true }
+            let step = event.keyCode == 125 ? 1 : -1
+            let index = current.flatMap { order.firstIndex(of: $0) }.map { $0 + step } ?? (step > 0 ? 0 : order.count - 1)
+            let next = order[min(max(index, 0), order.count - 1)]
+            model.organizeSelection = [next]
+            follow = next
+        case 49:                                          // space
+            if let url = current { model.listen(url, at: nil) }
+        case 123, 124:                                    // ← →
+            if model.prepPage.preview != nil { model.prepSeek(by: event.keyCode == 124 ? 10 : -10) }
+        default:
+            return false
+        }
+        return true
     }
 }
