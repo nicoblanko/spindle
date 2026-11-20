@@ -113,10 +113,9 @@ enum WaveformRenderer {
             for (key, path) in rgbPlayed { context.fill(path, with: .color(color(key).opacity(dim))) }
             for (key, path) in rgb { context.fill(path, with: .color(color(key))) }
         default:
-            context.fill(outerP[1], with: .color(monoColor.opacity(0.45)))
-            context.fill(innerP[1], with: .color(Theme.waveMid.opacity(0.45)))
+            // One solid colour: the peaks only, nothing layered inside.
+            context.fill(outerP[1], with: .color(monoColor.opacity(0.4)))
             context.fill(outerP[0], with: .color(monoColor))
-            context.fill(innerP[0], with: .color(Theme.waveMid))
         }
     }
 }
