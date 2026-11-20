@@ -549,5 +549,11 @@ struct SearchField: NSViewRepresentable {
         func controlTextDidChange(_ note: Notification) {
             if let field = note.object as? NSTextField { text.wrappedValue = field.stringValue }
         }
+        /// Enter leaves the field (the search stays), so the keys work again.
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+            control.window?.makeFirstResponder(nil)
+            return true
+        }
     }
 }
