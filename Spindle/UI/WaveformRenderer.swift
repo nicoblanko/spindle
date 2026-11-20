@@ -45,58 +45,58 @@ enum WaveformRenderer {
             return
         }
 
-        // Columns about 3 device pixels wide (wider when zoomed past the
+        // Columns about 2 device pixels wide (wider when zoomed past the
         // data), fixed to the track's timeline.
-        let bins = max(1, Int((3 * secondsPerPixel * rate).rounded()))
+        let bins = max(1, Int((2 * secondsPerPixel * rate).rounded()))
         let columnSeconds = Double(bins) / rate
         let first = max(0, Int((start / columnSeconds).rounded(.down)) - 2)
         let last = Int(((start + span) / columnSeconds).rounded(.up)) + 2
 
-        // The loudness per column, then lightly smoothed so the outline has
-        // no one-pixel spikes: thin spikes shimmer as the shape glides by
-        // fractions of a pixel, which reads as jitter.
-        var levels: [Float] = [], sectionOf: [Int] = []
+        // Peak and loudness per column, lightly smoothed: drawn as outlines
+        // (not one-pixel bars) so the detail glides without shimmering.
+        var peakOf: [Float] = [], loudOf: [Float] = [], sectionOf: [Int] = []
+        let rms = track.rms
         for column in first...max(first, last) {
             let b0 = column * bins
             if b0 >= peaks.count { break }
             let b1 = min(peaks.count, b0 + bins)
-            var peak: Float = 0
-            for b in b0..<b1 { peak = max(peak, peaks[b]) }
-            levels.append(peak)
+            var peak: Float = 0, loud: Float = 0
+            for b in b0..<b1 { peak = max(peak, peaks[b]); loud = max(loud, rms[b]) }
+            peakOf.append(peak); loudOf.append(min(peak, loud * 0.85))
             sectionOf.append(hasSections ? bucket(track.sections[b0]) : 5)
         }
-        guard !levels.isEmpty else { return }
-        var smooth = levels
-        for i in levels.indices {
-            let a = levels[max(0, i - 1)], c = levels[min(levels.count - 1, i + 1)]
-            smooth[i] = max(levels[i] * 0.6 + (a + c) * 0.2, 0)
+        guard !peakOf.isEmpty else { return }
+        func smoothed(_ v: [Float], _ k: Float) -> [Float] {
+            v.indices.map { i in v[i] * (1 - 2 * k) + (v[max(0, i - 1)] + v[min(v.count - 1, i + 1)]) * k }
         }
+        let peakS = smoothed(peakOf, 0.12), loudS = smoothed(loudOf, 0.2)
 
-        // The outline through the column centres, drawn in runs of the same
-        // strength (and played / ahead); neighbouring runs share their edge
-        // point so the shape stays whole.
-        let points: [(x: CGFloat, h: CGFloat, t: Double)] = smooth.indices.map { i in
-            let t = (Double(first + i) + 0.5) * columnSeconds
-            return (x(t), max(0.5 / scale, CGFloat(smooth[i]) * half), t)
-        }
-        func fill(_ part: ArraySlice<(x: CGFloat, h: CGFloat, t: Double)>, _ c: Color) {
-            guard part.count > 1 else { return }
+        let xs: [CGFloat] = peakS.indices.map { x((Double(first + $0) + 0.5) * columnSeconds) }
+        let ts: [Double] = peakS.indices.map { (Double(first + $0) + 0.5) * columnSeconds }
+        func fill(_ range: Range<Int>, _ h: [Float], _ c: Color) {
+            guard range.count > 1 else { return }
             var path = Path()
-            path.move(to: CGPoint(x: part.first!.x, y: mid))
-            for p in part { path.addLine(to: CGPoint(x: p.x, y: mid - p.h)) }
-            path.addLine(to: CGPoint(x: part.last!.x, y: mid))
-            for p in part.reversed() { path.addLine(to: CGPoint(x: p.x, y: mid + p.h)) }
+            path.move(to: CGPoint(x: xs[range.lowerBound], y: mid))
+            for i in range { path.addLine(to: CGPoint(x: xs[i], y: mid - max(0.5 / scale, CGFloat(h[i]) * half))) }
+            path.addLine(to: CGPoint(x: xs[range.upperBound - 1], y: mid))
+            for i in range.reversed() { path.addLine(to: CGPoint(x: xs[i], y: mid + max(0.5 / scale, CGFloat(h[i]) * half))) }
             path.closeSubpath()
             context.fill(path, with: .color(c))
         }
-        var runStart = 0
-        func key(_ i: Int) -> Int { sectionOf[i] * 2 + (dimPlayed && points[i].t < playhead ? 1 : 0) }
-        for i in 1...points.count {
-            if i == points.count || key(i) != key(runStart) {
-                let k = key(runStart)
-                let o = strength(k / 2) * (k % 2 == 1 ? 0.4 : 1)
-                fill(points[runStart..<min(points.count, i + 1)], color.opacity(o))
-                runStart = i
+        // In runs of the same strength (and played / ahead); neighbouring runs
+        // share their edge point so the shape stays whole. Peaks first, the
+        // loudness body on top.
+        func key(_ i: Int) -> Int { sectionOf[i] * 2 + (dimPlayed && ts[i] < playhead ? 1 : 0) }
+        for (layer, heights, factor) in [(0, peakS, 0.45), (1, loudS, 1.0)] {
+            _ = layer
+            var runStart = 0
+            for i in 1...xs.count {
+                if i == xs.count || key(i) != key(runStart) {
+                    let k = key(runStart)
+                    let o = strength(k / 2) * (k % 2 == 1 ? 0.4 : 1) * factor
+                    fill(runStart..<min(xs.count, i + 1), heights, color.opacity(o))
+                    runStart = i
+                }
             }
         }
     }
