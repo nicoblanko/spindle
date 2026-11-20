@@ -81,7 +81,7 @@ enum MonoColor: String, CaseIterable, Identifiable {
     var hex: UInt32? {
         switch self {
         case .deck: nil
-        case .white: 0xeeeeee
+        case .white: 0xffffff
         case .silver: 0x9aa0a8
         case .orange: 0xf08a24
         case .blue: 0x4fa3ff
@@ -198,9 +198,10 @@ enum Theme {
 extension Color {
     /// Every colour is pulled towards the grey of its brightness as far as
     /// the theme asks: not at all in Studio, halfway in Dusk, fully in Ink.
-    nonisolated init(hex: UInt32) {
+    /// `exact`: show this colour as it is in every theme (a colour you picked).
+    nonisolated init(hex: UInt32, exact: Bool = false) {
         let r = Double((hex >> 16) & 0xff) / 255, g = Double((hex >> 8) & 0xff) / 255, b = Double(hex & 0xff) / 255
-        let k = LookFlags.saturation
+        let k = exact ? 1 : LookFlags.saturation
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
         self.init(.sRGB, red: y + (r - y) * k, green: y + (g - y) * k, blue: y + (b - y) * k)
     }

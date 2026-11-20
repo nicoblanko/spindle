@@ -42,7 +42,8 @@ enum WaveformRenderer {
         let half = rect.height / 2
         let hasBands = track.low.count == peaks.count
         let style = hasBands ? style : .mono
-        let monoColor = LookSettings.shared.monoColor.hex.map { Color(hex: $0) } ?? monoColor
+        // A colour you picked shows as itself, even in Dusk and Ink.
+        let monoColor = LookSettings.shared.monoColor.hex.map { Color(hex: $0, exact: true) } ?? monoColor
 
         func pixel(_ t: Double) -> CGFloat {
             ((rect.minX + CGFloat((t - start) / span) * rect.width) * scale).rounded()
