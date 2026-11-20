@@ -348,9 +348,9 @@ struct RecordGrid: View {
             ZStack {
                 Theme.panel
                 if let c = context.meta.color(r.path) {
-                    // The colour fading to black across the row.
+                    // The colour fading to black from the top of the row down.
                     LinearGradient(colors: [c.color.opacity(isSelected ? 0.6 : 0.45), c.color.opacity(0)],
-                                   startPoint: .leading, endPoint: .trailing)
+                                   startPoint: .top, endPoint: .bottom)
                 }
                 else if isSelected { Theme.accentSoft }
                 if isSelected { Rectangle().strokeBorder(Theme.ink.opacity(0.5), lineWidth: 1) }
