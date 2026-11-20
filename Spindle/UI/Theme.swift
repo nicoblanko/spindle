@@ -31,6 +31,10 @@ final class LookSettings {
     var deckBColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.deckB") ?? "") ?? .orange {
         didSet { UserDefaults.standard.set(deckBColor.rawValue, forKey: "look.deckB") }
     }
+    /// The Prep player's colour: its waveform, loop slots and play button.
+    var prepColor = DeckColor(rawValue: UserDefaults.standard.string(forKey: "look.prep") ?? "") ?? .white {
+        didSet { UserDefaults.standard.set(prepColor.rawValue, forKey: "look.prep") }
+    }
 }
 
 /// A deck's colour, in three groups.
@@ -110,6 +114,7 @@ enum Theme {
     static var onAccent: Color { Color(hex: 0x000000) }
     static var deckA: Color { LookSettings.shared.deckAColor.color }
     static var deckB: Color { LookSettings.shared.deckBColor.color }
+    static var prep: Color { LookSettings.shared.prepColor.color }
     static var match: Color { Color(hex: 0xc8c8c8) }
     static var warn: Color { Color(hex: 0xffffff) }
     static var waveLow: Color { Color(hex: 0x3d6fb3) }

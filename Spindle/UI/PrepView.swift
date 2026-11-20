@@ -169,7 +169,7 @@ private struct PrepEditor: View {
                     .font(.system(size: 14))
                     .frame(width: 34, height: 28)
                     .foregroundStyle(page.playing ? Theme.onAccent : Theme.ink)
-                    .background(page.playing ? Theme.accent : Theme.control)
+                    .background(page.playing ? Theme.prep : Theme.control)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
             }
             .buttonStyle(.plain)
@@ -375,12 +375,13 @@ private struct PrepEditor: View {
     private func loopRow(_ n: Int, _ loop: SavedLoop) -> some View {
         let active = page.activeLoop == loop.id
         return HStack(spacing: 6) {
+            LoopColorButton(loop: loop) { model.prepSetLoopColor(loop.id, $0) }
             Button { model.prepAudition(loop.id) } label: {
-                Text("\(n + 1)")
+                Text("L\(n + 1)")
                     .font(Theme.readoutSm)
-                    .frame(width: 22, height: 20)
-                    .foregroundStyle(active ? Theme.onAccent : Theme.ink)
-                    .background(active ? Theme.match : Theme.control)
+                    .frame(width: 26, height: 20)
+                    .foregroundStyle(active ? Theme.onAccent : loop.swatch)
+                    .background(active ? loop.swatch : Theme.control)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
             }
             .buttonStyle(.plain)
@@ -477,18 +478,19 @@ private struct PrepOverview: View {
 
     var body: some View {
         let duration = max(model.prepDuration, 1)
+        let color = Theme.prep
         ZStack {
             // The waveform only changes with the track: draw it once.
             Canvas { context, size in
                 for loop in prep.loops {
                     let a = CGFloat(loop.start / duration) * size.width
                     let b = CGFloat((loop.start + Double(loop.beats) * prep.beatSeconds) / duration) * size.width
-                    context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(Theme.match.opacity(0.12)))
+                    context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(loop.swatch.opacity(0.18)))
                 }
                 if let track = page.preview {
                     WaveformRenderer.draw(context, track: track, start: 0, span: duration,
                                           rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
-                                          playhead: 0, dimPlayed: false)
+                                          playhead: 0, color: color, dimPlayed: false)
                 }
                 for cue in prep.cues {
                     let x = CGFloat(cue.time / duration) * size.width
@@ -529,9 +531,10 @@ private struct PrepLane: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
+                let color = Theme.prep
                 TimelineView(.animation(paused: !page.playing)) { _ in
                     let t = model.prepPosition
-                    Canvas { context, size in draw(context, size, playhead: t) }
+                    Canvas { context, size in draw(context, size, playhead: t, color: color) }
                 }
                 WaveformInteraction(
                     onScroll: { model.prepScrub(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
@@ -557,7 +560,7 @@ private struct PrepLane: View {
         }
     }
 
-    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double) {
+    private func draw(_ context: GraphicsContext, _ size: CGSize, playhead: Double, color: Color) {
         let span = page.zoom
         let start = playhead - span / 2
         let secondsPerPoint = span / Double(size.width)
@@ -572,8 +575,8 @@ private struct PrepLane: View {
         for loop in prep.loops {
             let a = x(loop.start), b = x(loop.start + Double(loop.beats) * prep.beatSeconds)
             guard b > 0, a < size.width else { continue }
-            context.fill(Path(CGRect(x: a, y: laneTop, width: max(1, b - a), height: laneHeight)), with: .color(Theme.match.opacity(0.10)))
-            context.fill(Path(CGRect(x: a, y: laneTop, width: max(1, b - a), height: 3)), with: .color(Theme.match.opacity(0.7)))
+            context.fill(Path(CGRect(x: a, y: laneTop, width: max(1, b - a), height: laneHeight)), with: .color(loop.swatch.opacity(0.12)))
+            context.fill(Path(CGRect(x: a, y: laneTop, width: max(1, b - a), height: 3)), with: .color(loop.swatch))
         }
 
         // Beatgrid: beats faint, bars stronger, 8-bar phrases strongest; bar
@@ -613,7 +616,7 @@ private struct PrepLane: View {
         if let track = page.preview {
             WaveformRenderer.draw(context, track: track, start: start, span: span,
                                   rect: CGRect(x: 0, y: laneTop + 4, width: size.width, height: laneHeight - 8),
-                                  playhead: playhead)
+                                  playhead: playhead, color: color)
         } else if let w = page.waveform {
             // The quick analysis waveform until the audio is decoded.
             var path = Path()
@@ -699,5 +702,35 @@ private struct CueEditor: View {
         var c = cue
         c.name = String(trimmed.prefix(12)).uppercased()
         onChange(c)
+    }
+}
+
+/// A loop slot's colour: a square that opens the eight cue colours.
+private struct LoopColorButton: View {
+    let loop: SavedLoop
+    let onPick: (Int) -> Void
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            RoundedRectangle(cornerRadius: Theme.radiusSm).fill(loop.swatch).frame(width: 14, height: 14)
+        }
+        .buttonStyle(.plain)
+        .help("Colour")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            HStack(spacing: 6) {
+                ForEach(Cue.palette.indices, id: \.self) { i in
+                    Button { onPick(i); open = false } label: {
+                        RoundedRectangle(cornerRadius: Theme.radiusSm)
+                            .fill(Cue.palette[i])
+                            .frame(width: 22, height: 22)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
+                                .stroke((loop.color ?? 6) == i ? Theme.ink : Color.clear, lineWidth: 2).padding(-3))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(Theme.space3)
+        }
     }
 }

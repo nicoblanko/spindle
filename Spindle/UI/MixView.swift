@@ -253,10 +253,10 @@ private struct DeckPerformance: View {
                                     Text(SavedLoop.barLabel(loop.bars)).font(Theme.readoutSm)
                                         .foregroundStyle(on ? Theme.onAccent : Theme.inkMuted)
                                 }
-                                .foregroundStyle(on ? Theme.onAccent : deck.color)
+                                .foregroundStyle(on ? Theme.onAccent : loop.swatch)
                                 .padding(.horizontal, 6)
                                 .frame(height: 22)
-                                .background(on ? deck.color : Theme.control)
+                                .background(on ? loop.swatch : Theme.control)
                                 .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
                             }
                             .buttonStyle(.plain)

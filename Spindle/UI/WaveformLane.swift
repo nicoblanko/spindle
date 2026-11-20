@@ -74,24 +74,27 @@ struct WaveformLane: View {
             context.fill(grid, with: .color(Theme.line))
             context.fill(bars, with: .color(Theme.line.opacity(0.9)))
         }
-        // Loop slots from Prep as thin bars along the bottom; the loop that
-        // is playing shaded across the lane.
+        // Loop slots exactly as on Prep (shaded, a bar along the top, in the
+        // colour you gave them); the loop that is playing outlined in its
+        // slot's colour, or the deck colour for a free loop.
         func lx(_ t: Double) -> CGFloat { centreX + CGFloat((t - playhead) / secondsPerPoint) }
         if let prep {
             for (n, loop) in prep.loops.enumerated() {
                 let a = lx(loop.start), b = lx(loop.start + Double(loop.beats) * prep.beatSeconds)
                 guard b > 0, a < size.width else { continue }
-                context.fill(Path(CGRect(x: a, y: size.height - 4, width: max(1, b - a), height: 4)), with: .color(deck.color.opacity(0.55)))
-                context.draw(Text("L\(n + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(deck.color),
-                             at: CGPoint(x: a + 3, y: size.height - 6), anchor: .bottomLeading)
+                context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(loop.swatch.opacity(0.12)))
+                context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(loop.swatch))
+                context.draw(Text("L\(n + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(loop.swatch),
+                             at: CGPoint(x: a + 3, y: size.height - 3), anchor: .bottomLeading)
             }
         }
         if deck.loopActive, deck.loopLength > 0 {
+            let loopColor = prep?.loops.first { $0.id == deck.activeSlot }?.swatch ?? deck.color
             let a = lx(deck.loopStart), b = lx(deck.loopStart + deck.loopLength)
-            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(deck.color.opacity(0.14)))
-            context.fill(Path(CGRect(x: a, y: 0, width: 2, height: size.height)), with: .color(deck.color))
-            context.fill(Path(CGRect(x: b - 2, y: 0, width: 2, height: size.height)), with: .color(deck.color))
-            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(deck.color))
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: size.height)), with: .color(loopColor.opacity(0.14)))
+            context.fill(Path(CGRect(x: a, y: 0, width: 2, height: size.height)), with: .color(loopColor))
+            context.fill(Path(CGRect(x: b - 2, y: 0, width: 2, height: size.height)), with: .color(loopColor))
+            context.fill(Path(CGRect(x: a, y: 0, width: max(1, b - a), height: 3)), with: .color(loopColor))
         }
 
         // Second ticks so movement is readable before a grid exists.
@@ -118,10 +121,13 @@ struct WaveformLane: View {
         if let prep {
             for (n, cue) in prep.cues.enumerated() {
                 let x = centreX + CGFloat((cue.time - playhead) / secondsPerPoint)
-                guard x > -40 && x < size.width else { continue }
+                guard x > -80 && x < size.width else { continue }
+                // The same flag as on Prep: number and name in the cue's colour.
                 context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(cue.swatch))
-                context.fill(Path(CGRect(x: x, y: 0, width: 14, height: 12)), with: .color(cue.swatch))
-                context.draw(Text("\(n + 1)").font(Theme.label).foregroundStyle(Theme.onAccent), at: CGPoint(x: x + 7, y: 6))
+                let label = context.resolve(Text("\(n + 1) \(cue.name)").font(Theme.label).foregroundStyle(Theme.onAccent))
+                let m = label.measure(in: size)
+                context.fill(Path(CGRect(x: x - 1, y: 0, width: m.width + 9, height: m.height + 4)), with: .color(cue.swatch))
+                context.draw(label, at: CGPoint(x: x + 4, y: 2), anchor: .topLeading)
             }
         }
 

@@ -28,10 +28,10 @@ nonisolated enum CueRole: Int, Codable, Sendable, CaseIterable, Identifiable {
     /// Fixed cue colours from the style guide.
     var color: Color {
         switch self {
-        case .intro: Color(hex: 0x2fbf71)
-        case .drop: Color(hex: 0xe6c229)
-        case .breakdown: Color(hex: 0x3fb6d9)
-        case .outro: Color(hex: 0xd9534f)
+        case .intro: Color(hex: 0x2fbf71, exact: true)
+        case .drop: Color(hex: 0xe6c229, exact: true)
+        case .breakdown: Color(hex: 0x3fb6d9, exact: true)
+        case .outro: Color(hex: 0xd9534f, exact: true)
         }
     }
 }
@@ -52,8 +52,9 @@ nonisolated struct Cue: Codable, Sendable, Equatable, Identifiable {
 
     /// The four style-guide cue colours first, then four more.
     static let paletteHex: [UInt32] = [0x2fbf71, 0xe6c229, 0x3fb6d9, 0xd9534f, 0x9b7bd9, 0xd96fa8, 0x5fd3c4, 0x9a9aa1]
-    static var palette: [Color] { paletteHex.map { Color(hex: $0) } }
-    var swatch: Color { Color(hex: Self.paletteHex[(color % Self.paletteHex.count + Self.paletteHex.count) % Self.paletteHex.count]) }
+    static var palette: [Color] { paletteHex.map { Color(hex: $0, exact: true) } }
+    /// Cue colours stay in colour in the black-and-white theme: they're markers.
+    var swatch: Color { Color(hex: Self.paletteHex[(color % Self.paletteHex.count + Self.paletteHex.count) % Self.paletteHex.count], exact: true) }
 
     init(time: Double, name: String, color: Int, auto: Bool = false, kind: CueRole? = nil) {
         self.time = time; self.name = name; self.color = color; self.auto = auto; self.kind = kind
@@ -83,7 +84,14 @@ nonisolated struct SavedLoop: Codable, Sendable, Equatable, Identifiable {
     var id = UUID()
     var start: Double
     var beats: Int
+    /// Index into `Cue.paletteHex`; nil (older files) shows as teal.
+    var color: Int?
     var bars: Double { Double(beats) / 4 }
+    /// The colour you gave it on Prep, the same on every page.
+    var swatch: Color {
+        let i = color ?? 6, n = Cue.paletteHex.count
+        return Color(hex: Cue.paletteHex[(i % n + n) % n], exact: true)
+    }
     static let barChoices: [Double] = [0.25, 0.5, 1, 2, 4, 8, 16, 32]
     static func barLabel(_ bars: Double) -> String {
         bars == 0.25 ? "¼" : bars == 0.5 ? "½" : "\(Int(bars))"

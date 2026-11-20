@@ -31,18 +31,22 @@ struct ColorPanelButton: View {
 
 struct ColorPanel: View {
     @Bindable var look: LookSettings
-    /// Which deck the swatches colour.
+    /// What the swatches colour: deck A, deck B or the Prep player.
     @State private var deck = 0
 
     private var selection: Binding<DeckColor> {
-        deck == 0 ? $look.deckAColor : $look.deckBColor
+        switch deck {
+        case 0: $look.deckAColor
+        case 1: $look.deckBColor
+        default: $look.prepColor
+        }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.space3) {
                 HStack {
-                    LabelText("Deck colours")
+                    LabelText("Colours")
                     Spacer()
                     Button { withAnimation(.easeOut(duration: 0.15)) { look.panelOpen = false } } label: {
                         Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
@@ -53,8 +57,9 @@ struct ColorPanel: View {
                 }
                 // A | B, each showing its colour.
                 VStack(spacing: 4) {
-                    deckTab(0, "A", look.deckAColor)
-                    deckTab(1, "B", look.deckBColor)
+                    deckTab(0, "Deck A", look.deckAColor)
+                    deckTab(1, "Deck B", look.deckBColor)
+                    deckTab(2, "Prep", look.prepColor)
                 }
                 ForEach(DeckColor.Group.allCases) { group in
                     VStack(alignment: .leading, spacing: 6) {
@@ -64,7 +69,7 @@ struct ColorPanel: View {
                         }
                     }
                 }
-                Text("Waveforms, deck headers and whatever is active on a deck.")
+                Text("Waveforms, headers and whatever is active. Cue markers keep their own colours.")
                     .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -79,7 +84,7 @@ struct ColorPanel: View {
         return Button { deck = index } label: {
             HStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: Theme.radiusSm).fill(color.color).frame(width: 12, height: 12)
-                Text("Deck \(label)").font(Theme.body).lineLimit(1)
+                Text(label).font(Theme.body).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(color.rawValue).font(Theme.caption).foregroundStyle(Theme.inkFaint).lineLimit(1)
             }
@@ -104,6 +109,6 @@ struct ColorPanel: View {
                     .padding(-3))
         }
         .buttonStyle(.plain)
-        .help("Deck \(deck == 0 ? "A" : "B"): \(c.rawValue)")
+        .help("\(["Deck A", "Deck B", "Prep"][deck]): \(c.rawValue)")
     }
 }

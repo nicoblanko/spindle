@@ -148,7 +148,10 @@ extension AppModel {
     func prepAddLoop(bars: Double = 4) {
         guard let p = prepGrid else { return }
         let start = p.snap(prepPosition)
-        prepEdit { $0.loops.append(SavedLoop(start: start, beats: Int(bars * 4))) }
+        prepEdit { p in
+            // A new colour per slot, starting at teal, so slots tell apart at once.
+            p.loops.append(SavedLoop(start: start, beats: Int(bars * 4), color: (6 + p.loops.count) % Cue.paletteHex.count))
+        }
     }
 
     /// Moves a loop slot's in-point to the beat at the playhead.
@@ -162,6 +165,10 @@ extension AppModel {
     func prepSetLoopBars(_ id: UUID, _ bars: Double) {
         prepEdit { if let i = $0.loops.firstIndex(where: { $0.id == id }) { $0.loops[i].beats = max(1, Int(bars * 4)) } }
         if prepPage.activeLoop == id { prepPage.activeLoop = nil; prepAudition(id) }
+    }
+
+    func prepSetLoopColor(_ id: UUID, _ color: Int) {
+        prepEdit { if let i = $0.loops.firstIndex(where: { $0.id == id }) { $0.loops[i].color = color } }
     }
 
     func prepRemoveLoop(_ id: UUID) {
