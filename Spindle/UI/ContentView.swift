@@ -114,6 +114,7 @@ extension ContentView {
             // The lane shows deck.laneWindow seconds across its width.
             let width = Double(NSApp.windows.first?.frame.width ?? 1400) / 2
             spindleLog.notice("\(JitterProbe.report(pointsPerSecond: width / model.decks[0].laneWindow, rate: 1 + model.decks[0].tempo))")
+            spindleLog.notice("\(JitterProbe.drawReport())")
             return
         }
         if ProcessInfo.processInfo.environment["SPINDLE_PREPLAG"] != nil {

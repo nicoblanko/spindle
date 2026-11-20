@@ -533,13 +533,14 @@ private struct PrepLane: View {
     @Bindable var page: PrepPageModel
     let prep: TrackPrep
     static let ruler: CGFloat = 18
+    @State private var clock = SmoothClock()
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 let color = Theme.prep
                 TimelineView(.animation(paused: !page.playing)) { timeline in
-                    let t = model.prepPosition(at: timeline.date)
+                    let t = page.playing ? clock.position(frame: timeline.date, measured: model.prepPosition, rate: 1) : model.prepPosition
                     Canvas { context, size in draw(context, size, playhead: t, color: color) }
                 }
                 WaveformInteraction(

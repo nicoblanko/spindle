@@ -15,14 +15,19 @@ struct WaveformLane: View {
     var prep: TrackPrep? = nil
     /// Seconds visible across the lane.
     var window: Double = 6
+    @State private var clock = SmoothClock()
 
     var body: some View {
         TimelineView(.animation) { timeline in
-            let playhead = telemetry?.pointee.playhead(at: timeline.date) ?? 0
+            let t = telemetry?.pointee ?? DeckTelemetry()
+            let playhead = clock.position(frame: timeline.date, measured: t.playhead, rate: t.pitch)
             let _ = deck.id == 0 ? JitterProbe.record(frame: timeline.date, playhead: playhead) : ()
             Canvas { context, size in
+                if deck.id == 0 { JitterProbe.drew(playhead: playhead, pointsPerSecond: Double(size.width) / window, scale: context.environment.displayScale) }
                 draw(context: context, size: size, playhead: playhead)
             }
+            // Rendered on the GPU (Metal) instead of rasterised on the CPU.
+            .drawingGroup()
         }
         .background(Theme.panel)
         .overlay {
