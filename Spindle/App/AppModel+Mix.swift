@@ -21,6 +21,9 @@ final class PrepPageModel {
     var cursor: Double = 0
     /// Seconds shown in the zoomed lane.
     var zoom: Double = 16
+
+    /// Multiplies the seconds shown (below 1 zooms in), within 2 s … 4 min.
+    func zoomBy(_ factor: Double) { zoom = min(max(zoom * factor, 2), 240) }
     var error: String?
 
     // Pre-listen player

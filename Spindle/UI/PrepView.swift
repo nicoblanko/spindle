@@ -83,7 +83,7 @@ final class PrepKeys {
 
     deinit { remove() }
 
-    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · D bar 1 here · [ ] nudge grid · C click · M marked"
+    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · − + zoom · D bar 1 here · [ ] nudge grid · C click · M marked"
     /// Key codes of the number keys 1–9.
     static let numberKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
@@ -109,6 +109,8 @@ final class PrepKeys {
         case 124: model.prepStep(beats: shift ? 1 : 4)
         case 126, 125:
             model.prepStepTrack(event.keyCode == 126 ? -1 : 1, in: model.pageRecords("prep").map(\.id))
+        case 27: page.zoomBy(2)                        // −
+        case 24: page.zoomBy(0.5)                      // = / +
         case 33: model.prepEdit { $0.gridOffset -= 0.005 }
         case 30: model.prepEdit { $0.gridOffset += 0.005 }
         default:
@@ -527,7 +529,7 @@ private struct PrepOverview: View {
 
 /// The zoomed lane: playhead fixed in the centre, bar ruler on top, cues
 /// and loops on the grid. Scroll or drag to move, click to jump, pinch or
-/// ⌘-scroll to zoom.
+/// ⌘-scroll, − + keys or the corner buttons to zoom.
 private struct PrepLane: View {
     let model: AppModel
     @Bindable var page: PrepPageModel
@@ -546,7 +548,7 @@ private struct PrepLane: View {
                 WaveformInteraction(
                     onScroll: { model.prepScrub(by: Double($0) * page.zoom / Double(max(geo.size.width, 1))) },
                     onClick: { f in model.prepSeek(to: model.prepPosition + (Double(f) - 0.5) * page.zoom) },
-                    onZoom: { f in page.zoom = min(max(page.zoom / Double(f), 2), 120) })
+                    onZoom: { f in page.zoomBy(1 / Double(f)) })
                 zoomButtons
                     .padding(Theme.space2)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -557,12 +559,16 @@ private struct PrepLane: View {
 
     private var zoomButtons: some View {
         HStack(spacing: 2) {
+            Button { page.zoomBy(2) } label: { Image(systemName: "minus") }
+                .buttonStyle(SmallButtonStyle()).help("Zoom out (−)")
             ForEach([(1, "1"), (4, "4"), (16, "16"), (64, "64")], id: \.0) { bars, label in
                 let seconds = Double(bars) * 4 * prep.beatSeconds
                 Button(label) { page.zoom = min(max(seconds, 2), 240) }
                     .buttonStyle(SmallButtonStyle())
                     .opacity(abs(page.zoom - seconds) < 0.01 ? 1 : 0.7)
             }
+            Button { page.zoomBy(0.5) } label: { Image(systemName: "plus") }
+                .buttonStyle(SmallButtonStyle()).help("Zoom in (+)")
             Text("bars").font(Theme.caption).foregroundStyle(Theme.inkFaint).padding(.leading, 2)
         }
     }
