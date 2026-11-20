@@ -617,10 +617,10 @@ struct RowColorButton: View {
 
     var body: some View {
         Button { open = true } label: {
-            RoundedRectangle(cornerRadius: Theme.radiusSm)
+            Circle()
                 .fill(color?.color ?? Color.clear)
-                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(color == nil ? Theme.inkFaint.opacity(0.35) : Color.clear, style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
-                .frame(width: 14, height: 14)
+                .overlay(Circle().strokeBorder(color == nil ? Theme.inkFaint.opacity(0.35) : Color.clear, style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
+                .frame(width: 12, height: 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
@@ -629,16 +629,16 @@ struct RowColorButton: View {
         .popover(isPresented: $open, arrowEdge: .bottom) {
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 6), spacing: 6) {
                 Button { onPick(nil); open = false } label: {
-                    RoundedRectangle(cornerRadius: Theme.radiusSm).strokeBorder(Theme.inkFaint)
+                    Circle().strokeBorder(Theme.inkFaint)
                         .overlay(Image(systemName: "xmark").font(.system(size: 9)).foregroundStyle(Theme.inkMuted))
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain).help("No colour")
                 ForEach(DeckColor.Group.soft.colors) { c in
                     Button { onPick(c); open = false } label: {
-                        RoundedRectangle(cornerRadius: Theme.radiusSm).fill(c.color)
+                        Circle().fill(c.color)
                             .frame(width: 22, height: 22)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
+                            .overlay(Circle()
                                 .stroke(color == c ? Theme.ink : Color.clear, lineWidth: 2).padding(-3))
                     }
                     .buttonStyle(.plain).help(c.rawValue)
