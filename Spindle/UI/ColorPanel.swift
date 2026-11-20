@@ -61,7 +61,8 @@ struct ColorPanel: View {
                     deckTab(1, "Deck B", look.deckBColor)
                     deckTab(2, "Mark", look.prepColor)
                 }
-                ForEach(DeckColor.Group.allCases) { group in
+                // Calm colours for waveforms; the vivid ones are for markers (Mark page).
+                ForEach([DeckColor.Group.neutrals, .soft]) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(group.rawValue).font(Theme.caption).foregroundStyle(Theme.inkFaint)
                         LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 7), count: 6), alignment: .leading, spacing: 7) {

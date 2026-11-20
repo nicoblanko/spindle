@@ -263,10 +263,10 @@ private struct PrepEditor: View {
             HStack(alignment: .top, spacing: 1) {
                 cueTools
                     .frame(maxWidth: .infinity)
-                gridTools
-                    .frame(width: 286)
                 loopTools
                     .frame(width: 440)
+                gridTools
+                    .frame(width: 286)
             }
             .background(Theme.line)
             .frame(maxHeight: .infinity)
@@ -319,6 +319,9 @@ private struct PrepEditor: View {
     private func cueCard(_ n: Int, _ cue: Cue) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
+                MarkerColorButton(index: cue.color) { c in
+                    model.prepEdit { p in if let i = p.cues.firstIndex(where: { $0.id == cue.id }) { p.cues[i].color = c } }
+                }
                 Text("\(n + 1)").font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
                 Text(cue.name).font(Theme.label).foregroundStyle(cue.swatch).lineLimit(1)
                 Spacer(minLength: 0)
@@ -375,7 +378,7 @@ private struct PrepEditor: View {
     private func loopRow(_ n: Int, _ loop: SavedLoop) -> some View {
         let active = page.activeLoop == loop.id
         return HStack(spacing: 6) {
-            LoopColorButton(loop: loop) { model.prepSetLoopColor(loop.id, $0) }
+            MarkerColorButton(index: loop.color ?? 6) { model.prepSetLoopColor(loop.id, $0) }
             Button { model.prepAudition(loop.id) } label: {
                 Text("L\(n + 1)")
                     .font(Theme.readoutSm)
@@ -705,27 +708,29 @@ private struct CueEditor: View {
     }
 }
 
-/// A loop slot's colour: a square that opens the eight cue colours.
-private struct LoopColorButton: View {
-    let loop: SavedLoop
+/// A marker's colour (cue or loop slot): a square that opens the vivid
+/// marker colours. Changeable any time.
+private struct MarkerColorButton: View {
+    let index: Int
     let onPick: (Int) -> Void
     @State private var open = false
 
     var body: some View {
+        let n = Cue.paletteHex.count
         Button { open = true } label: {
-            RoundedRectangle(cornerRadius: Theme.radiusSm).fill(loop.swatch).frame(width: 14, height: 14)
+            RoundedRectangle(cornerRadius: Theme.radiusSm).fill(Cue.palette[(index % n + n) % n]).frame(width: 14, height: 14)
         }
         .buttonStyle(.plain)
         .help("Colour")
         .popover(isPresented: $open, arrowEdge: .bottom) {
-            HStack(spacing: 6) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 6), spacing: 6) {
                 ForEach(Cue.palette.indices, id: \.self) { i in
                     Button { onPick(i); open = false } label: {
                         RoundedRectangle(cornerRadius: Theme.radiusSm)
                             .fill(Cue.palette[i])
                             .frame(width: 22, height: 22)
                             .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm + 2)
-                                .stroke((loop.color ?? 6) == i ? Theme.ink : Color.clear, lineWidth: 2).padding(-3))
+                                .stroke((index % n + n) % n == i ? Theme.ink : Color.clear, lineWidth: 2).padding(-3))
                     }
                     .buttonStyle(.plain)
                 }

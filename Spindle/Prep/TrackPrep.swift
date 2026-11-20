@@ -51,7 +51,10 @@ nonisolated struct Cue: Codable, Sendable, Equatable, Identifiable {
     var kind: CueRole?
 
     /// The four style-guide cue colours first, then four more.
-    static let paletteHex: [UInt32] = [0x2fbf71, 0xe6c229, 0x3fb6d9, 0xd9534f, 0x9b7bd9, 0xd96fa8, 0x5fd3c4, 0x9a9aa1]
+    /// Marker colours (cues and loop slots): the vivid ones. The first eight
+    /// keep their place so saved markers keep their colour.
+    static let paletteHex: [UInt32] = [0x2fbf71, 0xe6c229, 0x3fb6d9, 0xd9534f, 0x9b7bd9, 0xd96fa8, 0x5fd3c4, 0x9a9aa1,
+                                       0x4fa3ff, 0xb6e93a, 0xf08a24, 0xe040fb]
     static var palette: [Color] { paletteHex.map { Color(hex: $0, exact: true) } }
     /// Cue colours stay in colour in the black-and-white theme: they're markers.
     var swatch: Color { Color(hex: Self.paletteHex[(color % Self.paletteHex.count + Self.paletteHex.count) % Self.paletteHex.count], exact: true) }
