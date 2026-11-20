@@ -158,7 +158,7 @@ struct TrackOverview: View {
                 let playedX = CGFloat(playhead / track.duration) * size.width
                 WaveformRenderer.draw(context, track: track, start: 0, span: track.duration,
                                       rect: CGRect(x: 0, y: 2, width: size.width, height: size.height - 4),
-                                      playhead: playhead, color: deck.color)
+                                      playhead: playhead, color: deck.color, detailed: true)
                 func x(_ t: Double) -> CGFloat { CGFloat(t / track.duration) * size.width }
                 if let prep {
                     // Loop slots: shaded with a bar along the top, in their colour.

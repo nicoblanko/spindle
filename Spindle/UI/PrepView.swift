@@ -496,7 +496,7 @@ private struct PrepOverview: View {
                 if let track = page.preview {
                     WaveformRenderer.draw(context, track: track, start: 0, span: duration,
                                           rect: CGRect(x: 0, y: 4, width: size.width, height: size.height - 8),
-                                          playhead: 0, color: color, dimPlayed: false)
+                                          playhead: 0, color: color, dimPlayed: false, detailed: true)
                 }
                 for cue in prep.cues {
                     let x = CGFloat(cue.time / duration) * size.width

@@ -13,30 +13,49 @@
 import SwiftUI
 
 enum WaveformRenderer {
+    /// Colour strength for a section level (0 = emptiest, 1 = fullest), in
+    /// six steps: same colour, breaks and intros further back.
+    private static func strength(_ bucket: Int) -> Double { 0.3 + 0.7 * Double(bucket) / 5 }
+    private static func bucket(_ section: Float) -> Int { Int((min(max(section, 0), 1) * 5).rounded()) }
+
     /// Draws seconds `start` … `start + span` of `track` into `rect`.
-    /// Everything before `playhead` is drawn dimmer.
+    /// Everything before `playhead` is drawn dimmer, and the colour's
+    /// strength follows how full each section is.
+    ///
+    /// `detailed` (the whole-track overviews, which don't scroll): a body of
+    /// loudness with the peaks as fine spikes on top, one pixel per column.
+    /// Otherwise (scrolling lanes): a smoothed outline, which glides without
+    /// shimmering.
     static func draw(_ context: GraphicsContext, track: LoadedTrack, start: Double, span: Double,
-                     rect: CGRect, playhead: Double, color: Color = Theme.ink, dimPlayed: Bool = true) {
+                     rect: CGRect, playhead: Double, color: Color = Theme.ink, dimPlayed: Bool = true,
+                     detailed: Bool = false) {
         let peaks = track.peaks
         guard !peaks.isEmpty, span > 0, rect.width > 1 else { return }
         let scale = max(context.environment.displayScale, 1)
         let rate = LoadedTrack.peaksPerSecond
         let secondsPerPixel = span / Double(rect.width * scale)
+        let hasSections = track.sections.count == peaks.count
+        let mid = rect.midY
+        let half = rect.height / 2
+        func x(_ t: Double) -> CGFloat { rect.minX + CGFloat((t - start) / span) * rect.width }
+
+        if detailed {
+            drawDetailed(context, track: track, start: start, span: span, rect: rect, playhead: playhead,
+                         color: color, dimPlayed: dimPlayed, scale: scale, secondsPerPixel: secondsPerPixel)
+            return
+        }
+
         // Columns about 3 device pixels wide (wider when zoomed past the
         // data), fixed to the track's timeline.
         let bins = max(1, Int((3 * secondsPerPixel * rate).rounded()))
         let columnSeconds = Double(bins) / rate
         let first = max(0, Int((start / columnSeconds).rounded(.down)) - 2)
         let last = Int(((start + span) / columnSeconds).rounded(.up)) + 2
-        let mid = rect.midY
-        let half = rect.height / 2
-        func x(_ t: Double) -> CGFloat { rect.minX + CGFloat((t - start) / span) * rect.width }
 
         // The loudness per column, then lightly smoothed so the outline has
         // no one-pixel spikes: thin spikes shimmer as the shape glides by
         // fractions of a pixel, which reads as jitter.
-        var levels: [Float] = []
-        levels.reserveCapacity(max(0, last - first + 1))
+        var levels: [Float] = [], sectionOf: [Int] = []
         for column in first...max(first, last) {
             let b0 = column * bins
             if b0 >= peaks.count { break }
@@ -44,6 +63,7 @@ enum WaveformRenderer {
             var peak: Float = 0
             for b in b0..<b1 { peak = max(peak, peaks[b]) }
             levels.append(peak)
+            sectionOf.append(hasSections ? bucket(track.sections[b0]) : 5)
         }
         guard !levels.isEmpty else { return }
         var smooth = levels
@@ -52,8 +72,9 @@ enum WaveformRenderer {
             smooth[i] = max(levels[i] * 0.6 + (a + c) * 0.2, 0)
         }
 
-        // One outline through the column centres, top then bottom, split
-        // where the playhead is so the played part can be dimmer.
+        // The outline through the column centres, drawn in runs of the same
+        // strength (and played / ahead); neighbouring runs share their edge
+        // point so the shape stays whole.
         let points: [(x: CGFloat, h: CGFloat, t: Double)] = smooth.indices.map { i in
             let t = (Double(first + i) + 0.5) * columnSeconds
             return (x(t), max(0.5 / scale, CGFloat(smooth[i]) * half), t)
@@ -68,10 +89,48 @@ enum WaveformRenderer {
             path.closeSubpath()
             context.fill(path, with: .color(c))
         }
-        let split = dimPlayed ? (points.firstIndex { $0.t >= playhead } ?? points.count) : 0
-        // Share the point at the split so the two parts meet without a gap.
-        fill(points[0..<min(points.count, split + 1)], color.opacity(0.4))
-        fill(points[split..<points.count], color)
+        var runStart = 0
+        func key(_ i: Int) -> Int { sectionOf[i] * 2 + (dimPlayed && points[i].t < playhead ? 1 : 0) }
+        for i in 1...points.count {
+            if i == points.count || key(i) != key(runStart) {
+                let k = key(runStart)
+                let o = strength(k / 2) * (k % 2 == 1 ? 0.4 : 1)
+                fill(points[runStart..<min(points.count, i + 1)], color.opacity(o))
+                runStart = i
+            }
+        }
+    }
+
+    /// The overview: per pixel column, loudness as the body and the peak as a
+    /// fine spike above it, both in the section's strength.
+    private static func drawDetailed(_ context: GraphicsContext, track: LoadedTrack, start: Double, span: Double,
+                                     rect: CGRect, playhead: Double, color: Color, dimPlayed: Bool,
+                                     scale: CGFloat, secondsPerPixel: Double) {
+        let peaks = track.peaks, rms = track.rms
+        let rate = LoadedTrack.peaksPerSecond
+        let hasSections = track.sections.count == peaks.count
+        let pixels = Int(rect.width * scale)
+        let mid = rect.midY, half = rect.height / 2
+        // Bodies by strength step (and played), spikes likewise.
+        var body = [Path](repeating: Path(), count: 12), spike = [Path](repeating: Path(), count: 12)
+        for px in 0..<pixels {
+            let t0 = start + Double(px) * secondsPerPixel, t1 = t0 + secondsPerPixel
+            let b0 = max(0, Int(t0 * rate)), b1 = min(peaks.count, max(b0 + 1, Int(t1 * rate)))
+            guard b0 < peaks.count else { break }
+            var peak: Float = 0, loud: Float = 0
+            for b in b0..<b1 { peak = max(peak, peaks[b]); loud = max(loud, rms[b]) }
+            let k = (hasSections ? bucket(track.sections[b0]) : 5) * 2 + (dimPlayed && t1 <= playhead ? 1 : 0)
+            let x = rect.minX + CGFloat(px) / scale, w = 1 / scale
+            let hp = max(0.5 / scale, CGFloat(peak) * half)
+            let hb = min(hp, max(0.5 / scale, CGFloat(loud) * 0.85 * half))
+            body[k].addRect(CGRect(x: x, y: mid - hb, width: w, height: hb * 2))
+            spike[k].addRect(CGRect(x: x, y: mid - hp, width: w, height: hp * 2))
+        }
+        for k in 0..<12 {
+            let o = strength(k / 2) * (k % 2 == 1 ? 0.4 : 1)
+            context.fill(spike[k], with: .color(color.opacity(o * 0.45)))
+            context.fill(body[k], with: .color(color.opacity(o)))
+        }
     }
 }
 

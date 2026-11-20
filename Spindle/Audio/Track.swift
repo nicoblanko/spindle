@@ -32,6 +32,10 @@ nonisolated struct LoadedTrack: Sendable {
     let peaks: [Float]
     /// Loudness (RMS) per column, on the same scale as `peaks`.
     let rms: [Float]
+    /// How full each moment's section is (loudness averaged over 4 s),
+    /// 0 = the track's emptiest part, 1 = its fullest: breaks and intros
+    /// low, drops high. Shades the waveforms so the build reads at a glance.
+    let sections: [Float]
     static let peaksPerSecond: Double = 200
     /// Pointer to a heap-allocated TrackSamples, handed to the deck.
     nonisolated(unsafe) let samples: UnsafeMutablePointer<TrackSamples>
@@ -95,6 +99,7 @@ nonisolated enum TrackLoader {
         return LoadedTrack(url: url, title: title, artist: artist,
                            duration: Double(frames) / sampleRate,
                            peaks: overview.peaks, rms: overview.rms,
+                           sections: Self.sections(overview.rms),
                            samples: samples)
     }
 
@@ -124,6 +129,23 @@ nonisolated enum TrackLoader {
         // RMS of a full-scale signal sits ~3 dB under its peak; lift it a
         // little so the solid layer fills most of the outline.
         return (peaks.map { $0 / maxPeak }, rms.map { min(1, $0 * 1.5 / maxPeak) })
+    }
+
+    private static func sections(_ rms: [Float]) -> [Float] {
+        let n = rms.count
+        guard n > 0 else { return [] }
+        let half = Int(2 * LoadedTrack.peaksPerSecond)            // ±2 s
+        var prefix = [Double](repeating: 0, count: n + 1)
+        for i in 0..<n { prefix[i + 1] = prefix[i] + Double(rms[i]) }
+        var avg = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let a = max(0, i - half), b = min(n, i + half + 1)
+            avg[i] = Float((prefix[b] - prefix[a]) / Double(b - a))
+        }
+        // Spread between the quiet and full parts (5th…95th percentile).
+        let sorted = avg.sorted()
+        let lo = sorted[Int(Double(n - 1) * 0.05)], hi = max(sorted[Int(Double(n - 1) * 0.95)], lo + 1e-4)
+        return avg.map { min(1, max(0, ($0 - lo) / (hi - lo))) }
     }
 
     private static func metadata(url: URL) async -> (String, String) {
