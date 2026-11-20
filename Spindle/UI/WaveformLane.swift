@@ -141,6 +141,8 @@ struct WaveformLane: View {
 struct TrackOverview: View {
     let deck: DeckModel
     let telemetry: UnsafeMutablePointer<DeckTelemetry>?
+    /// Cues and loop slots from Mark, shown as on the Mark page.
+    var prep: TrackPrep? = nil
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
@@ -151,6 +153,24 @@ struct TrackOverview: View {
                 WaveformRenderer.draw(context, track: track, start: 0, span: track.duration,
                                       rect: CGRect(x: 0, y: 2, width: size.width, height: size.height - 4),
                                       playhead: playhead, color: deck.color)
+                func x(_ t: Double) -> CGFloat { CGFloat(t / track.duration) * size.width }
+                if let prep {
+                    // Loop slots: shaded with a bar along the top, in their colour.
+                    for loop in prep.loops {
+                        let a = x(loop.start), w = max(2, x(loop.start + Double(loop.beats) * prep.beatSeconds) - a)
+                        context.fill(Path(CGRect(x: a, y: 0, width: w, height: size.height)), with: .color(loop.swatch.opacity(0.22)))
+                        context.fill(Path(CGRect(x: a, y: 0, width: w, height: 2)), with: .color(loop.swatch))
+                    }
+                    // Cues: a line and a numbered tab, in the cue's colour.
+                    for (n, cue) in prep.cues.enumerated() {
+                        let cx = x(cue.time)
+                        context.fill(Path(CGRect(x: cx - 0.75, y: 0, width: 1.5, height: size.height)), with: .color(cue.swatch))
+                        let label = context.resolve(Text("\(n + 1)").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.onAccent))
+                        let m = label.measure(in: size)
+                        context.fill(Path(CGRect(x: cx - 0.75, y: 0, width: m.width + 5, height: m.height + 1)), with: .color(cue.swatch))
+                        context.draw(label, at: CGPoint(x: cx + 1.75, y: 0.5), anchor: .topLeading)
+                    }
+                }
                 if deck.loopActive, deck.loopLength > 0 {
                     let a = CGFloat(deck.loopStart / track.duration) * size.width
                     let w = max(2, CGFloat(deck.loopLength / track.duration) * size.width)

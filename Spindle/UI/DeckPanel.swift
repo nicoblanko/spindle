@@ -82,7 +82,8 @@ struct DeckPanel: View {
     private var waveforms: some View {
         VStack(spacing: 1) {
             GeometryReader { geo in
-                TrackOverview(deck: deck, telemetry: engine?.telemetry)
+                TrackOverview(deck: deck, telemetry: engine?.telemetry,
+                              prep: deck.track.flatMap { model.prep.prep(for: $0.url) })
                     .overlay {
                         WaveformInteraction(
                             onScroll: { points in
