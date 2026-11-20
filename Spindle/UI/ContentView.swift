@@ -381,56 +381,69 @@ private struct TopBar: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        HStack(spacing: Theme.space3) {
-            Text("Spindle").font(Theme.title).foregroundStyle(Theme.ink)
+        HStack(spacing: Theme.space2) {
+            Text("SPINDLE").font(Theme.mono(12, .semibold)).tracking(2.5).foregroundStyle(Theme.ink)
+                .padding(.trailing, Theme.space2)
             RecordButton(model: model)
             if model.sessions.recording {
                 Text(SessionStore.clock(model.sessions.elapsed)).font(Theme.readoutSm).foregroundStyle(Theme.ink)
             }
             Spacer()
-            Button("MIDI") { model.showingMIDI = true }
-                .buttonStyle(FlatButtonStyle())
-                .help("Map an Akai MPK mini or other MIDI controller (MIDI learn)")
 
-            Picker("Device", selection: $model.selectedDeviceID) {
-                ForEach(model.devices) { device in
-                    Text("\(device.name)  (\(device.inputChannels) in / \(device.outputChannels) out)")
-                        .tag(Optional(device.id))
-                }
-            }
-            .frame(maxWidth: 320)
-
-            if model.controlMode != .laptop {
-                Picker("Vinyl", selection: $model.definition) {
-                    ForEach(TimecodeDefinition.all) { def in
-                        Text(def.name).tag(def)
+            // How the decks are played.
+            HStack(spacing: 1) {
+                ForEach(AppModel.ControlMode.allCases) { mode in
+                    TopIcon(icon: mode.icon, active: model.controlMode == mode, help: mode.help) {
+                        model.controlMode = mode
+                        Task { await model.start() }
                     }
                 }
-                .frame(maxWidth: 240)
+            }
+            .background(Theme.control)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+
+            if model.controlMode != .laptop {
+                Menu {
+                    ForEach(TimecodeDefinition.all) { def in
+                        Button { model.definition = def } label: {
+                            if def == model.definition { Label(def.name, systemImage: "checkmark") } else { Text(def.name) }
+                        }
+                    }
+                } label: {
+                    TopMenuLabel(icon: "barcode", text: model.definition.name)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Timecode vinyl")
             }
 
-            Picker("Play with", selection: Binding(
-                get: { model.controlMode },
-                set: { mode in
-                    model.controlMode = mode
-                    Task { await model.start() }
-                })) {
-                ForEach(AppModel.ControlMode.allCases) { Text($0.rawValue).tag($0) }
+            Menu {
+                ForEach(model.devices) { device in
+                    Button { model.selectedDeviceID = device.id } label: {
+                        let name = "\(device.name)  (\(device.inputChannels) in / \(device.outputChannels) out)"
+                        if device.id == model.selectedDeviceID { Label(name, systemImage: "checkmark") } else { Text(name) }
+                    }
+                }
+            } label: {
+                TopMenuLabel(icon: "hifispeaker", text: model.devices.first { $0.id == model.selectedDeviceID }?.name ?? "No device")
             }
-            .frame(maxWidth: 220)
-            .help("Vinyl: Traktor timecode records. Laptop: play from Spindle alone. Simulated vinyl: virtual turntables for testing.")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("Audio device")
 
-            Button(model.running ? "Restart" : "Start") {
-                Task { await model.start() }
+            divider
+
+            // Engine: power on / off, restart, and its numbers.
+            TopIcon(icon: "power", active: model.running,
+                    help: model.running ? "Stop the audio engine" : "Start the audio engine") {
+                if model.running { model.stop() } else { Task { await model.start() } }
             }
-            .buttonStyle(FlatButtonStyle(primary: !model.running))
-
             if model.running {
-                Button("Stop") { model.stop() }
-                    .buttonStyle(FlatButtonStyle())
+                TopIcon(icon: "arrow.clockwise", help: "Restart the audio engine") { Task { await model.start() } }
             }
-
             status
+
+            divider
+
+            TopIcon(icon: "pianokeys", help: "MIDI mapping (MIDI learn)") { model.showingMIDI = true }
             ColorPanelButton(look: LookSettings.shared)
         }
         .font(Theme.body)
@@ -441,18 +454,79 @@ private struct TopBar: View {
         .onAppear { model.refreshDevices() }
     }
 
+    private var divider: some View {
+        Rectangle().fill(Theme.line).frame(width: 1, height: 18).padding(.horizontal, Theme.space1)
+    }
+
     @ViewBuilder
     private var status: some View {
         if let engine = model.engine {
             let ms = Double(engine.bufferFrames) / engine.sampleRate * 1000
-            Text(String(format: "%.0f kHz · %d smp · %.1f ms%@",
-                        engine.sampleRate / 1000, engine.bufferFrames, ms,
-                        engine.simulate ? " · SIM" : (engine.laptop ? " · LAPTOP" : "")))
+            Text(String(format: "%.0fk · %.1f ms", engine.sampleRate / 1000, ms))
                 .font(Theme.readoutSm)
-                .foregroundStyle(Theme.inkMuted)
+                .foregroundStyle(Theme.inkFaint)
+                .help("\(engine.bufferFrames) samples per buffer")
         } else {
-            LabelText("Stopped", color: Theme.inkFaint)
+            Text("off").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
         }
+    }
+}
+
+extension AppModel.ControlMode {
+    var icon: String {
+        switch self {
+        case .vinyl: "opticaldisc"
+        case .laptop: "laptopcomputer"
+        case .simulated: "circle.dashed"
+        }
+    }
+    var help: String {
+        switch self {
+        case .vinyl: "Vinyl: play with Traktor timecode records"
+        case .laptop: "Laptop: play from Spindle alone"
+        case .simulated: "Simulated vinyl: virtual turntables for testing"
+        }
+    }
+}
+
+/// A square icon button for the top bar; lit white when active.
+struct TopIcon: View {
+    let icon: String
+    var active = false
+    var help = ""
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .frame(width: 30, height: 26)
+                .foregroundStyle(active ? Theme.onAccent : Theme.ink)
+                .background(active ? Theme.ink : Theme.control)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+/// Icon plus a short value, for the top bar's menus.
+private struct TopMenuLabel: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 12))
+            Text(text).font(Theme.caption).lineLimit(1).frame(maxWidth: 170, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.inkFaint)
+        }
+        .foregroundStyle(Theme.ink)
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(Theme.control)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
     }
 }
 

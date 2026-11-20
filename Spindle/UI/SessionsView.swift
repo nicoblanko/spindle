@@ -182,17 +182,17 @@ struct RecordButton: View {
         Button {
             model.toggleRecording()
         } label: {
-            HStack(spacing: Theme.space1) {
-                Circle().fill(Theme.warn).frame(width: 9, height: 9)
-                    .opacity(recording ? 1 : 0.8)
-                Text(recording ? "Stop recording" : "Record")
-                    .font(Theme.body)
+            HStack(spacing: 6) {
+                Image(systemName: recording ? "stop.fill" : "record.circle")
+                    .font(.system(size: recording ? 10 : 14))
+                if recording { Text("REC").font(Theme.mono(11, .semibold)).tracking(1) }
             }
-            .padding(.horizontal, Theme.space3)
-            .padding(.vertical, 5)
-            .foregroundStyle(Theme.ink)
-            .background(recording ? Theme.warn.opacity(0.3) : Theme.control)
+            .frame(minWidth: 30, minHeight: 26)
+            .padding(.horizontal, recording ? 8 : 0)
+            .foregroundStyle(recording ? Theme.onAccent : Theme.ink)
+            .background(recording ? Theme.ink : Theme.control)
             .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(model.engine == nil)
