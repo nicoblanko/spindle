@@ -234,6 +234,20 @@ final class PrepStore {
         scheduleSave()
     }
 
+    /// Removes every cue and loop slot from every track (grids stay).
+    func clearAllCuesAndLoops() -> Int {
+        var count = 0
+        for (path, p) in preps where !p.cues.isEmpty || !p.loops.isEmpty {
+            var q = p
+            q.cues = []
+            q.loops = []
+            preps[path] = q
+            count += 1
+        }
+        if count > 0 { scheduleSave() }
+        return count
+    }
+
     func set(_ prep: TrackPrep, for url: URL) {
         preps[url.path] = prep
         scheduleSave()

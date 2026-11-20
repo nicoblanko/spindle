@@ -424,7 +424,7 @@ private struct PrepEditor: View {
             }
             Button("Detect again") { model.resuggest(url) }
                 .buttonStyle(SmallButtonStyle())
-                .help("Replaces the grid, cues and loop slots with a fresh suggestion. FX and mix-ready stay.")
+                .help("Detects the tempo and beatgrid again. Your cues and loop slots stay.")
         } content: {
             HStack(spacing: 3) {
                 Button("−") { model.prepEdit { $0.bpm -= 0.01 } }.help("−0.01 BPM")

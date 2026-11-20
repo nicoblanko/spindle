@@ -256,8 +256,6 @@ extension AppModel {
                 p.bpm = fresh.prep.bpm
                 p.gridOffset = fresh.prep.gridOffset
                 p.gridUnsure = fresh.prep.gridUnsure
-                p.cues = fresh.prep.cues
-                p.loops = fresh.prep.loops
             }
             syncPreviewGrid()
             _ = suggestion

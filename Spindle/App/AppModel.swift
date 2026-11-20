@@ -199,6 +199,20 @@ final class AppModel {
         await analysis.analyze(library.allTracks.map(\.url))
         await prepareAll()
         await regridIfNeeded()
+        clearSuggestedCuesOnce()
+    }
+
+    /// You place cues and loop slots yourself: once, clear the ones Spindle
+    /// suggested (and any others), keeping a copy of the prep file first.
+    private func clearSuggestedCuesOnce() {
+        guard !UserDefaults.standard.bool(forKey: "cuesCleared") else { return }
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Spindle/prep.json")
+        let copy = SafeWrite.backupFolder.appendingPathComponent("prep before clearing cues.json")
+        try? FileManager.default.copyItem(at: file, to: copy)
+        let n = prep.clearAllCuesAndLoops()
+        UserDefaults.standard.set(true, forKey: "cuesCleared")
+        spindleLog.notice("Cleared cues and loop slots on \(n) tracks (copy: \(copy.lastPathComponent))")
     }
     /// The deck whose Load… button opened the file picker. There is one picker
     /// for the window: SwiftUI only runs one `.fileImporter` among sibling views.

@@ -46,7 +46,7 @@ nonisolated enum PrepAnalyzer {
 
         var prep = TrackPrep(bpm: refinedBPM, gridOffset: first)
         prep.gridUnsure = sure ? nil : true
-        suggestCues(&prep, onset: onset, duration: duration)
+        // No cues or loop slots: you place those yourself.
         let (peaks, lows) = overview(mono, onset: onset, rate: rate)
         return PrepSuggestion(prep: prep, peaks: peaks, lows: lows)
     }
