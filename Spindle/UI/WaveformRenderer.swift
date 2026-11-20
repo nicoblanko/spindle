@@ -103,12 +103,11 @@ enum WaveformRenderer {
                 let r = Double(key / 36) / 5, g = Double(key / 6 % 6) / 5, b = Double(key % 6) / 5
                 // Serato-like: bass red, mids green, highs blue, never too dark.
                 let red = 0.15 + 0.85 * r, green = 0.12 + 0.8 * g, blue = 0.2 + 0.8 * b
-                if LookFlags.mono {
-                    // Grey by brightness: bass darker, highs lighter.
-                    let y = 0.25 + 0.2 * r + 0.3 * g + 0.45 * b
-                    return Color(.sRGB, red: y, green: y, blue: y)
-                }
-                return Color(.sRGB, red: red, green: green, blue: blue)
+                // Toned towards grey like everything else (Dusk halfway, Ink fully);
+                // in grey, bass reads darker and highs lighter.
+                let k = LookFlags.saturation
+                let y = 0.25 + 0.2 * r + 0.3 * g + 0.45 * b
+                return Color(.sRGB, red: y + (red - y) * k, green: y + (green - y) * k, blue: y + (blue - y) * k)
             }
             for (key, path) in rgbPlayed { context.fill(path, with: .color(color(key).opacity(dim))) }
             for (key, path) in rgb { context.fill(path, with: .color(color(key))) }

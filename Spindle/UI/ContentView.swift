@@ -100,14 +100,14 @@ extension ContentView {
         }
         guard let dir = ProcessInfo.processInfo.environment["SPINDLE_SNAPSHOT"] else { return }
         let original = model.page
-        // SPINDLE_LOOK=rgb|3-band|mono[,darker]: snapshot in that look, then restore yours.
+        // SPINDLE_LOOK=rgb|3-band|mono[,dusk|,ink]: snapshot in that look, then restore yours.
         let look = LookSettings.shared
-        let savedLook = (look.darker, look.waveStyle)
+        let savedLook = (look.theme, look.waveStyle)
         if let spec = ProcessInfo.processInfo.environment["SPINDLE_LOOK"]?.lowercased() {
-            look.darker = spec.contains("darker")
+            look.theme = spec.contains("ink") || spec.contains("darker") ? .ink : spec.contains("dusk") ? .dusk : .studio
             look.waveStyle = spec.contains("rgb") ? .rgb : spec.contains("mono") ? .mono : .threeBand
         }
-        defer { look.darker = savedLook.0; look.waveStyle = savedLook.1 }
+        defer { look.theme = savedLook.0; look.waveStyle = savedLook.1 }
         try? await Task.sleep(for: .seconds(4))
         let tracks = model.library.tracks
         // Speed check: building the Organize list with the current view.
@@ -430,7 +430,12 @@ private struct LookMenu: View {
 
     var body: some View {
         Menu {
-            Toggle("Black & white", isOn: $look.darker)
+            Picker("Theme", selection: $look.theme) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text("\(theme.rawValue) — \(theme.summary)").tag(theme)
+                }
+            }
+            .pickerStyle(.inline)
             Picker("Waveform", selection: $look.waveStyle) {
                 ForEach(WaveStyle.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -441,7 +446,7 @@ private struct LookMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Black & white look and waveform colours")
+        .help("Theme (Studio, Dusk, Ink) and waveform colours")
     }
 }
 

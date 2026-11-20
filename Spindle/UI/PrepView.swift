@@ -478,7 +478,7 @@ private struct PrepOverview: View {
     var body: some View {
         let duration = max(model.prepDuration, 1)
         let style = LookSettings.shared.waveStyle
-        let _ = LookSettings.shared.darker
+        let _ = LookSettings.shared.theme
         ZStack {
             // The waveform only changes with the track: draw it once.
             Canvas { context, size in
@@ -532,7 +532,7 @@ private struct PrepLane: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 let style = LookSettings.shared.waveStyle
-                let _ = LookSettings.shared.darker
+                let _ = LookSettings.shared.theme
                 TimelineView(.animation(paused: !page.playing)) { _ in
                     let t = model.prepPosition
                     Canvas { context, size in draw(context, size, playhead: t, style: style) }

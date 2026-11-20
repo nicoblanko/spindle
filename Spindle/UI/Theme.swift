@@ -11,31 +11,63 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Look settings you can change while the app runs: the darker variant of
-/// the theme and the waveform style. Views read them through `Theme`, so
-/// they redraw when one changes.
+/// Look settings you can change while the app runs: the colour theme and
+/// the waveform style. Views read them through `Theme`, so they redraw when
+/// one changes.
 @Observable
 final class LookSettings {
     static let shared = LookSettings()
 
-    /// Black & white: pure black surfaces, every colour turned to the grey
-    /// of the same brightness.
-    var darker = UserDefaults.standard.bool(forKey: "look.darker") {
+    var theme: AppTheme = LookSettings.savedTheme {
         didSet {
-            UserDefaults.standard.set(darker, forKey: "look.darker")
-            LookFlags.mono = darker
+            UserDefaults.standard.set(theme.rawValue, forKey: "look.theme")
+            LookFlags.saturation = theme.saturation
         }
     }
 
-    init() { LookFlags.mono = darker }
+    init() { LookFlags.saturation = theme.saturation }
+
+    private static var savedTheme: AppTheme {
+        if let raw = UserDefaults.standard.string(forKey: "look.theme"), let t = AppTheme(rawValue: raw) { return t }
+        return UserDefaults.standard.bool(forKey: "look.darker") ? .ink : .studio     // the old switch
+    }
+
     var waveStyle = WaveStyle(rawValue: UserDefaults.standard.string(forKey: "look.wave") ?? "") ?? .threeBand {
         didSet { UserDefaults.standard.set(waveStyle.rawValue, forKey: "look.wave") }
     }
 }
 
+/// The colour themes, from full colour to none.
+enum AppTheme: String, CaseIterable, Identifiable {
+    /// The original: dark grey panels, orange accent, full colour.
+    case studio = "Studio"
+    /// In between: darker panels, every colour toned halfway to grey.
+    case dusk = "Dusk"
+    /// Black and white: pure black, white, greys only.
+    case ink = "Ink"
+    var id: String { rawValue }
+
+    /// How much colour is kept (1 = all, 0 = greys).
+    var saturation: Double {
+        switch self {
+        case .studio: 1
+        case .dusk: 0.45
+        case .ink: 0
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .studio: "Original colours"
+        case .dusk: "Darker, muted colours"
+        case .ink: "Black and white"
+        }
+    }
+}
+
 /// Read by `Color(hex:)` from any thread, so it can't live on the main actor.
 nonisolated enum LookFlags {
-    nonisolated(unsafe) static var mono = false
+    nonisolated(unsafe) static var saturation = 1.0
 }
 
 /// How waveforms are coloured.
@@ -44,28 +76,36 @@ enum WaveStyle: String, CaseIterable, Identifiable {
     case threeBand = "3-Band"
     /// One shape, coloured by its sound: red bass, green mids, blue highs.
     case rgb = "RGB"
-    /// One colour, loudness inside the peaks.
+    /// One solid colour.
     case mono = "Mono"
     var id: String { rawValue }
 }
 
 enum Theme {
-    private static var d: Bool { LookSettings.shared.darker }
-    static var bg: Color { d ? Color(hex: 0x000000) : Color(hex: 0x161618) }
-    static var panel: Color { d ? Color(hex: 0x0a0a0a) : Color(hex: 0x1f1f22) }
-    static var panelRaised: Color { d ? Color(hex: 0x141414) : Color(hex: 0x2a2a2e) }
-    static var control: Color { d ? Color(hex: 0x1f1f1f) : Color(hex: 0x35353a) }
-    static var line: Color { d ? Color(hex: 0x282828) : Color(hex: 0x3e3e44) }
-    static var ink: Color { d ? Color(hex: 0xf2f2f2) : Color(hex: 0xe2e2e4) }
+    private static var t: AppTheme { LookSettings.shared.theme }
+    /// Studio, Dusk, Ink.
+    private static func pick(_ studio: UInt32, _ dusk: UInt32, _ ink: UInt32) -> Color {
+        switch t {
+        case .studio: Color(hex: studio)
+        case .dusk: Color(hex: dusk)
+        case .ink: Color(hex: ink)
+        }
+    }
+    static var bg: Color { pick(0x161618, 0x0e0e10, 0x000000) }
+    static var panel: Color { pick(0x1f1f22, 0x151517, 0x0a0a0a) }
+    static var panelRaised: Color { pick(0x2a2a2e, 0x1d1d20, 0x141414) }
+    static var control: Color { pick(0x35353a, 0x28282c, 0x1f1f1f) }
+    static var line: Color { pick(0x3e3e44, 0x2f2f34, 0x282828) }
+    static var ink: Color { pick(0xe2e2e4, 0xe6e6e8, 0xf2f2f2) }
     static var inkMuted: Color { Color(hex: 0x9a9aa1) }
     static var inkFaint: Color { Color(hex: 0x6c6c73) }
-    static var accent: Color { d ? Color(hex: 0xffffff) : Color(hex: 0xf08a24) }
-    static var accentSoft: Color { d ? Color(hex: 0x2e2e2e) : Color(hex: 0x4a2f16) }
-    static var onAccent: Color { d ? Color(hex: 0x000000) : Color(hex: 0x161618) }
-    static var deckA: Color { d ? Color(hex: 0xe8e8e8) : Color(hex: 0x4fa3ff) }
-    static var deckB: Color { d ? Color(hex: 0x8a8a8a) : Color(hex: 0xc06a2b) }
-    static var match: Color { d ? Color(hex: 0xc8c8c8) : Color(hex: 0x5fd37a) }
-    static var warn: Color { d ? Color(hex: 0xffffff) : Color(hex: 0xff5a4f) }
+    static var accent: Color { pick(0xf08a24, 0xf08a24, 0xffffff) }
+    static var accentSoft: Color { pick(0x4a2f16, 0x3a2a1c, 0x2e2e2e) }
+    static var onAccent: Color { pick(0x161618, 0x0e0e10, 0x000000) }
+    static var deckA: Color { pick(0x4fa3ff, 0x4fa3ff, 0xe8e8e8) }
+    static var deckB: Color { pick(0xc06a2b, 0xc06a2b, 0x8a8a8a) }
+    static var match: Color { pick(0x5fd37a, 0x5fd37a, 0xc8c8c8) }
+    static var warn: Color { pick(0xff5a4f, 0xff5a4f, 0xffffff) }
     static var waveLow: Color { Color(hex: 0x3d6fb3) }
     static var waveMid: Color { Color(hex: 0xa8b4c4) }
     static var waveHigh: Color { Color(hex: 0xeef2f7) }
@@ -100,15 +140,13 @@ enum Theme {
 }
 
 extension Color {
-    /// In Black & white, every colour becomes the grey of its brightness.
+    /// Every colour is pulled towards the grey of its brightness as far as
+    /// the theme asks: not at all in Studio, halfway in Dusk, fully in Ink.
     nonisolated init(hex: UInt32) {
         let r = Double((hex >> 16) & 0xff) / 255, g = Double((hex >> 8) & 0xff) / 255, b = Double(hex & 0xff) / 255
-        if LookFlags.mono {
-            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-            self.init(.sRGB, red: y, green: y, blue: y)
-        } else {
-            self.init(.sRGB, red: r, green: g, blue: b)
-        }
+        let k = LookFlags.saturation
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        self.init(.sRGB, red: y + (r - y) * k, green: y + (g - y) * k, blue: y + (b - y) * k)
     }
 }
 
