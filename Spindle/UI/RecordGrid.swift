@@ -27,6 +27,9 @@ struct RecordGrid: View {
     var dimmed: ((Record) -> Bool)? = nil
     /// Ticked off: played already (Mix).
     var played: ((Record) -> Bool)? = nil
+    /// Controls before the row number (Mix: played box, A and B).
+    var leading: ((Record) -> AnyView)? = nil
+    var leadingWidth: CGFloat = 0
     /// Width of the Track column (narrower on Prep).
     var nameWidth: CGFloat = 300
     @State private var anchor: URL?
@@ -154,6 +157,7 @@ struct RecordGrid: View {
 
     private var header: some View {
         HStack(spacing: 0) {
+            if leading != nil { Color.clear.frame(width: leadingWidth) }
             Text("#").frame(width: 36)
             ForEach(columns, id: \.self) { f in headerCell(f) }
             Button { addingField = true } label: {
@@ -271,6 +275,7 @@ struct RecordGrid: View {
     private func row(_ r: Record) -> some View {
         let isSelected = selected.contains(r.id)
         return HStack(spacing: 0) {
+            if let leading { leading(r).frame(width: leadingWidth) }
             Text("\(r.index)").font(Theme.readoutSm).foregroundStyle(Theme.inkFaint).frame(width: 36)
             ForEach(columns, id: \.self) { f in
                 cell(r, f)
@@ -323,10 +328,6 @@ struct RecordGrid: View {
             HStack(spacing: 4) {
                 if mixes(r) { Circle().fill(Theme.match).frame(width: 6, height: 6) }
                 let wasPlayed = played?(r) == true
-                if wasPlayed {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Theme.inkMuted)
-                        .help("Played this session")
-                }
                 Text(r.track.name).font(Theme.body)
                     .foregroundStyle(wasPlayed || dimmed?(r) == true ? Theme.inkFaint : Theme.ink).lineLimit(1)
             }

@@ -554,6 +554,11 @@ extension AppModel {
         }
     }
 
+    /// Ticks a track off by hand, or back on.
+    func togglePlayed(_ url: URL) {
+        if playedURLs.contains(url) { playedURLs.remove(url); playSeconds[url] = 0 } else { playedURLs.insert(url) }
+    }
+
     /// Starts a fresh played list (a new set).
     func resetPlayed() {
         playedURLs = []

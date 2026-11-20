@@ -38,6 +38,8 @@ struct MixView: View {
                                     selection: Binding(get: { model.mixSelection }, set: { model.mixSelection = $0 }),
                                     dimmed: dimUnfit ? { !fits($0.id) } : nil,
                                     played: { model.playedURLs.contains($0.id) },
+                                    leading: { AnyView(RowControls(model: model, url: $0.id)) },
+                                    leadingWidth: 78,
                                     trailing: AnyView(HStack(spacing: Theme.space2) {
                                         if !model.playedURLs.isEmpty {
                                             Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(Theme.inkMuted)
@@ -52,8 +54,6 @@ struct MixView: View {
                                             .foregroundStyle(Theme.inkMuted)
                                             .help("Grey out tracks whose key or tempo doesn't fit a playing deck")
                                     }))
-                    Rectangle().fill(Theme.line).frame(height: 1)
-                    LoadBar(model: model, fits: fits)
                 }
             }
             .background(Theme.line)
@@ -110,83 +110,42 @@ private struct LaptopMixer: View {
     }
 }
 
-// MARK: Load bar
+// MARK: Row controls
 
-/// The one place tracks are loaded from: the selected track, why it fits,
-/// its cues, and Load A / Load B. (Double-click loads into the free deck;
-/// tracks can also be dragged onto a deck.)
-private struct LoadBar: View {
+/// At the start of each Mix row: played (ticks itself after 20 s of play,
+/// or click it) and A / B to load the track, lit in the deck's colour while
+/// it's on that deck.
+private struct RowControls: View {
     let model: AppModel
-    let fits: (URL) -> Bool
+    let url: URL
 
     var body: some View {
-        let url = model.mixSelection.first
-        HStack(spacing: Theme.space4) {
-            HStack(spacing: Theme.space2) {
-                ForEach(model.decks) { deck in
-                    Button {
-                        if let url { Task { await model.load(url: url, into: deck) } }
-                    } label: {
-                        Text("Load \(deck.label)")
-                            .font(Theme.label)
-                            .foregroundStyle(Theme.ink)
-                            .frame(width: 70, height: 26)
-                            .background(Theme.control)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).stroke(deck.color, lineWidth: 1))
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(url == nil)
-                }
+        let played = model.playedURLs.contains(url)
+        HStack(spacing: 4) {
+            Button { model.togglePlayed(url) } label: {
+                Image(systemName: played ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13))
+                    .foregroundStyle(played ? Theme.ink : Theme.inkFaint)
+                    .frame(width: 20, height: 20)
             }
-            if let url {
-                let a = model.analysis.analysis(for: url)
-                let prep = model.prep.prep(for: url)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(url.deletingPathExtension().lastPathComponent).font(Theme.title).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(a.map { "\(String(format: "%.1f", prep?.bpm ?? $0.bpm)) · \($0.camelotNumber) \(KeyStyle.mood(minor: $0.keyMinor)) · E\($0.energy) · \(OrganizeView.length($0.duration))" } ?? "Not analysed yet")
-                        .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted)
+            .buttonStyle(.plain)
+            .help(played ? "Played · click to untick" : "Not played yet · click to tick")
+            ForEach(model.decks) { deck in
+                let on = deck.track?.url == url
+                Button { Task { await model.load(url: url, into: deck) } } label: {
+                    Text(deck.label)
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 20, height: 18)
+                        .foregroundStyle(on ? Theme.onAccent : deck.color)
+                        .background(on ? deck.color : Theme.control)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
                 }
-                .frame(width: 320, alignment: .leading)
-                cueLine(prep, duration: a?.duration ?? 1)
-                Text(reason(url)).font(Theme.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
-                    .frame(width: 220, alignment: .trailing)
-            } else {
-                Spacer()
+                .buttonStyle(.plain)
+                .help(on ? "On deck \(deck.label)" : "Load on deck \(deck.label)")
             }
         }
-        .padding(.horizontal, Theme.space3)
-        .frame(height: 56)
-        .background(Theme.panelRaised)
-    }
-
-    /// The four cues as ticks on a line through the track.
-    private func cueLine(_ prep: TrackPrep?, duration: Double) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Theme.line).frame(height: 2)
-                ForEach(prep?.cues ?? []) { cue in
-                    Rectangle().fill(cue.swatch).frame(width: 2, height: 14)
-                        .offset(x: CGFloat(cue.time / max(duration, 1)) * geo.size.width)
-                        .help(cue.name)
-                }
-            }
-            .frame(maxHeight: .infinity)
-        }
-        .frame(height: 18)
-    }
-
-    /// "Lift from deck A · −0.8%", or why it doesn't fit.
-    private func reason(_ url: URL) -> String {
-        guard let clip = model.analysis.analysis(for: url) else { return "" }
-        let bpm = model.bpm(of: url) ?? clip.bpm
-        for deck in model.decks where deck.playing {
-            guard let t = deck.track, t.url != url, let a = model.analysis.analysis(for: t.url), let live = model.liveBPM(deck) else { continue }
-            let ratio = [bpm, bpm * 2, bpm / 2].map { $0 / live - 1 }.min { abs($0) < abs($1) } ?? 0
-            let move = MixRelation.between(a, clip)?.title ?? "Key clash"
-            return "\(move) after deck \(deck.label) · " + String(format: "%+.1f%%", ratio * 100)
-        }
-        return fits(url) ? "Nothing playing" : ""
+        .padding(.leading, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
