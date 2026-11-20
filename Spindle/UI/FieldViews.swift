@@ -7,6 +7,7 @@
 //  popover, star ratings, and the Filter, Group and Hide fields popovers.
 //
 
+import AppKit
 import SwiftUI
 
 /// A select option: pastel capsule with dark text, as in Airtable.
@@ -512,5 +513,41 @@ struct HideFieldsView: View {
         }
         .frame(width: 260)
         .background(Theme.panel)
+    }
+}
+
+/// A search box that only takes the keyboard when you click in it: never by
+/// Tab, and never on its own when a page opens.
+struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder = "Search"
+
+    final class Field: NSSearchField {
+        override var canBecomeKeyView: Bool { false }
+    }
+
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
+        field.placeholderString = placeholder
+        field.stringValue = text
+        field.delegate = context.coordinator
+        field.sendsSearchStringImmediately = true
+        field.controlSize = .regular
+        return field
+    }
+
+    func updateNSView(_ field: Field, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ note: Notification) {
+            if let field = note.object as? NSTextField { text.wrappedValue = field.stringValue }
+        }
     }
 }

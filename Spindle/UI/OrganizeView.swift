@@ -140,8 +140,7 @@ struct OrganizeView: View {
                 }
                 .buttonStyle(FlatButtonStyle())
             }
-            TextField("Search", text: $library.search)
-                .textFieldStyle(.roundedBorder)
+            SearchField(text: $library.search)
                 .frame(maxWidth: 180)
         }
         .padding(.horizontal, Theme.space3)

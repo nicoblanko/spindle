@@ -104,8 +104,7 @@ struct SharedTrackList: View {
             chip("rectangle.grid.1x2", active: v.groupBy != nil, v.groupBy.map { model.records.name($0) } ?? "Group") { showGroup = true }
                 .popover(isPresented: $showGroup) { GroupView(view: view, context: model.records) }
             if let trailing { trailing }
-            TextField("Search", text: $library.search)
-                .textFieldStyle(.roundedBorder)
+            SearchField(text: $library.search)
                 .frame(maxWidth: 160)
         }
         .padding(.horizontal, Theme.space3)

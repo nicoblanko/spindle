@@ -15,6 +15,7 @@ struct MixView: View {
     let model: AppModel
     @Bindable var library: LibraryModel
     @AppStorage("mix.dimUnfit") private var dimUnfit = true
+    @State private var keys = MixKeys()
 
     /// Fits a playing deck: compatible key and tempo within 6% (half and
     /// double time count). With nothing playing, everything fits.
@@ -29,6 +30,15 @@ struct MixView: View {
     }
 
     var body: some View {
+        page
+            .onAppear {
+                keys.install(model)
+                DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
+            }
+            .onDisappear { keys.remove() }
+    }
+
+    private var page: some View {
         VStack(spacing: 0) {
             HStack(spacing: 1) {
                 CrateList(library: library, model: model)
@@ -64,6 +74,10 @@ struct MixView: View {
                     VStack(spacing: 0) {
                         DeckPanel(deck: deck, model: model, compact: true)
                         DeckPerformance(deck: deck, model: model)
+                    }
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { keys.hovered = deck.id } else if keys.hovered == deck.id { keys.hovered = nil }
                     }
                 }
             }
@@ -259,5 +273,36 @@ enum PrepEditorClock {
     static func clock(_ s: Double) -> String {
         let tenths = Int((max(0, s) * 10).rounded())
         return String(format: "%d:%02d.%d", tenths / 600, tenths / 10 % 60, tenths % 10)
+    }
+}
+
+
+/// Mix's keys: space plays or stops the deck under the mouse.
+final class MixKeys {
+    var hovered: Int?
+    private var monitor: Any?
+
+    func install(_ model: AppModel) {
+        remove()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak model] event in
+            guard let self, let model, self.handle(event, model) else { return event }
+            return nil
+        }
+    }
+
+    func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+
+    private func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
+        guard event.keyCode == 49, let id = hovered, model.decks.indices.contains(id),
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+              !(event.window?.firstResponder is NSText) else { return false }
+        let deck = model.decks[id]
+        model.setPlaying(!deck.transportPlaying, deck: deck)
+        return true
     }
 }
