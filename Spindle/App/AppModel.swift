@@ -193,7 +193,7 @@ final class AppModel {
     }
 
     enum Page: String, CaseIterable, Identifiable {
-        case organize = "Organize", prep = "Prep", mix = "Mix", sessions = "Sessions"
+        case organize = "Organize", prep = "Mark", mix = "Mix", sessions = "Sessions"
         var id: String { rawValue }
         var available: Bool { true }
     }

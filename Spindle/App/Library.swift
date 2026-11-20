@@ -49,7 +49,7 @@ final class LibraryModel {
     var isPrepped: (URL) -> Bool = { _ in false }
 
     enum SmartList: String, CaseIterable, Identifiable {
-        case notPrepped = "Not prepped", untagged = "Untagged", inNoSet = "In no set"
+        case notPrepped = "Not marked", untagged = "Untagged", inNoSet = "In no set"
         var id: String { rawValue }
     }
 

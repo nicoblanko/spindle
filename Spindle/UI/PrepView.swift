@@ -83,7 +83,7 @@ final class PrepKeys {
 
     deinit { remove() }
 
-    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · D bar 1 here · [ ] nudge grid · C click · M mix-ready"
+    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · D bar 1 here · [ ] nudge grid · C click · M marked"
     /// Key codes of the number keys 1–9.
     static let numberKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
@@ -241,7 +241,7 @@ private struct PrepEditor: View {
 
             Rectangle().fill(Theme.line).frame(width: 1, height: 22)
 
-            Toggle("Mix-ready", isOn: Binding(get: { prep.mixReady }, set: { v in model.prepEdit { $0.mixReady = v } }))
+            Toggle("Marked", isOn: Binding(get: { prep.mixReady }, set: { v in model.prepEdit { $0.mixReady = v } }))
                 .toggleStyle(.checkbox)
                 .font(Theme.body)
                 .foregroundStyle(Theme.ink)

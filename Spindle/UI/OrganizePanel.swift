@@ -242,7 +242,7 @@ private struct Inspector: View {
                     section("In sets") { sets(urls) }
                     section("Rating") { rating(urls) }
                     section("Notes") { notesEditor(urls) }
-                    section("Prep") { prep(urls) }
+                    section("Mark") { prep(urls) }
                 }
             }
         }
@@ -375,9 +375,9 @@ private struct Inspector: View {
     private func prep(_ urls: [URL]) -> some View {
         let ready = urls.filter { model.prep.prep(for: $0)?.mixReady == true }.count
         return HStack {
-            Text("\(ready) of \(urls.count) mix-ready").font(Theme.body).foregroundStyle(Theme.inkMuted)
+            Text("\(ready) of \(urls.count) marked").font(Theme.body).foregroundStyle(Theme.inkMuted)
             Spacer()
-            Button("Open in Prep →") {
+            Button("Open in Mark →") {
                 if let first = urls.first { model.selectForPrep(first) }
                 model.page = .prep
             }

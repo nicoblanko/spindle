@@ -307,7 +307,7 @@ struct RecordContext {
         case .length: "Length"
         case .tempoGroup: "Tempo group"
         case .tags: "Tags"
-        case .mixReady: "Mix-ready"
+        case .mixReady: "Marked"
         case .custom(let id): fields.field(id)?.name ?? "Field"
         }
     }

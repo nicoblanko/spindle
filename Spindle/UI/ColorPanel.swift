@@ -59,7 +59,7 @@ struct ColorPanel: View {
                 VStack(spacing: 4) {
                     deckTab(0, "Deck A", look.deckAColor)
                     deckTab(1, "Deck B", look.deckBColor)
-                    deckTab(2, "Prep", look.prepColor)
+                    deckTab(2, "Mark", look.prepColor)
                 }
                 ForEach(DeckColor.Group.allCases) { group in
                     VStack(alignment: .leading, spacing: 6) {
@@ -109,6 +109,6 @@ struct ColorPanel: View {
                     .padding(-3))
         }
         .buttonStyle(.plain)
-        .help("\(["Deck A", "Deck B", "Prep"][deck]): \(c.rawValue)")
+        .help("\(["Deck A", "Deck B", "Mark"][deck]): \(c.rawValue)")
     }
 }

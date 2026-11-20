@@ -131,7 +131,7 @@ struct SharedTrackList: View {
             ForEach(model.decks) { deck in
                 Button("Load into deck \(deck.label)") { Task { await model.load(url: url, into: deck) } }
             }
-            Button("Open in Prep") { model.selectForPrep(url); model.page = .prep }
+            Button("Open in Mark") { model.selectForPrep(url); model.page = .prep }
             Divider()
         }
         Menu("Add to set") {
