@@ -11,9 +11,17 @@ import Foundation
 
 extension AppModel {
     /// Where the Prep tools act: the live playhead while playing, else the cursor.
+    /// The playhead for a frame that will be shown at `frame`.
+    func prepPosition(at frame: Date) -> Double {
+        if prepPage.playing, let e = engine?.preview, e.jumpRequest.isNaN {
+            return max(0, e.telemetry.pointee.playhead(at: frame) + e.nudgePending)
+        }
+        return prepPosition
+    }
+
     var prepPosition: Double {
         if prepPage.playing, let e = engine?.preview {
-            let t = e.jumpRequest.isNaN ? e.telemetry.pointee.playhead + e.nudgePending : e.jumpRequest
+            let t = e.jumpRequest.isNaN ? e.telemetry.pointee.smoothPlayhead + e.nudgePending : e.jumpRequest
             return max(0, t)
         }
         return prepPage.cursor

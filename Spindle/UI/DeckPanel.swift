@@ -24,11 +24,11 @@ struct DeckPanel: View {
             Rectangle().fill(Theme.line).frame(height: 1)
             waveforms
             Rectangle().fill(Theme.line).frame(height: 1)
-            TimelineView(.animation) { _ in
+            Group {
                 if compact {
-                    liveCompact(engine?.telemetry.pointee ?? DeckTelemetry())
+                    liveCompact
                 } else {
-                    live(engine?.telemetry.pointee ?? DeckTelemetry())
+                    TimelineView(.animation) { _ in live(engine?.telemetry.pointee ?? DeckTelemetry()) }
                 }
             }
             .padding(compact ? Theme.space2 : Theme.space3)
@@ -253,26 +253,40 @@ struct DeckPanel: View {
     }
 
     /// One fixed-width line: time, remaining, pitch, mode, lock.
-    private func liveCompact(_ t: DeckTelemetry) -> some View {
+    /// The numbers change every frame, so they're drawn into a canvas: a
+    /// canvas redraws without SwiftUI measuring the window again (text that
+    /// changed every frame made the whole window re-lay out, ~20 fps).
+    private var liveCompact: some View {
         HStack(spacing: Theme.space3) {
-            Text(Self.clock(t.playhead)).font(Theme.readout).foregroundStyle(Theme.ink).frame(width: 92, alignment: .leading)
-            Text(deck.track.map { "−" + Self.clock(max(0, $0.duration - t.playhead)) } ?? " ")
-                .font(Theme.readoutSm).foregroundStyle(Theme.inkMuted).frame(width: 70, alignment: .leading)
-            Text(Self.pitch(t.pitch)).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 64, alignment: .leading)
-            Text(abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀")).font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 14)
-            if model.laptop {
-                Text(model.liveBPM(deck).map { String(format: "%.1f BPM", $0 * max(abs(t.pitch), 0.0001) / max(abs(deck.pitch), 0.0001)) } ?? "")
-                    .font(Theme.readoutSm).foregroundStyle(Theme.ink).frame(width: 90, alignment: .leading)
-            } else {
-                Text(t.absolute ? "ABS" : "REL").font(Theme.readoutSm).foregroundStyle(t.absolute ? Theme.ink : Theme.inkMuted).frame(width: 30)
+            TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
+                let t = engine?.telemetry.pointee ?? DeckTelemetry()
+                let duration = deck.track?.duration
+                let bpm = model.laptop ? model.liveBPM(deck).map { String(format: "%.1f BPM", $0 * max(abs(t.pitch), 0.0001) / max(abs(deck.pitch), 0.0001)) } ?? "" : (t.absolute ? "ABS" : "REL")
+                Canvas { context, size in
+                    func put(_ s: String, _ x: CGFloat, _ font: Font, _ color: Color) {
+                        context.draw(Text(s).font(font).foregroundStyle(color), at: CGPoint(x: x, y: size.height / 2), anchor: .leading)
+                    }
+                    put(Self.clock(t.playhead), 0, Theme.readout, Theme.ink)
+                    put(duration.map { "−" + Self.clock(max(0, $0 - t.playhead)) } ?? "", 104, Theme.readoutSm, Theme.inkMuted)
+                    put(Self.pitch(t.pitch), 186, Theme.readoutSm, Theme.ink)
+                    put(abs(t.pitch) < 0.005 ? "■" : (t.pitch >= 0 ? "▶" : "◀"), 262, Theme.readoutSm, Theme.ink)
+                    put(bpm, 288, Theme.readoutSm, Theme.ink)
+                }
             }
+            .frame(width: 400, height: 22)
             Spacer(minLength: 0)
-            if t.coasting {
-                Button("■ Stop deck") { model.stopCoasting(deck: deck) }
-                    .font(Theme.readoutSm).buttonStyle(.plain).foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 6).background(Theme.control)
+            // Lock and needle-up state: a few times a second is plenty.
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                let t = engine?.telemetry.pointee ?? DeckTelemetry()
+                HStack(spacing: Theme.space2) {
+                    if t.coasting {
+                        Button("■ Stop deck") { model.stopCoasting(deck: deck) }
+                            .font(Theme.readoutSm).buttonStyle(.plain).foregroundStyle(Theme.ink)
+                            .padding(.horizontal, 6).background(Theme.control)
+                    }
+                    if !model.laptop { lockBadge(t) }
+                }
             }
-            if !model.laptop { lockBadge(t) }
         }
         .frame(height: 22)
     }

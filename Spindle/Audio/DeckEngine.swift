@@ -29,6 +29,26 @@ nonisolated struct DeckTelemetry {
     /// The needle left the record while the track was playing, and the deck
     /// carries on at the last speed until the needle is back.
     var coasting = false
+    /// When this was written (seconds, system uptime clock).
+    var stamp: Double = 0
+
+    /// The playhead now, between audio buffers: where it was at `stamp`
+    /// plus how far it has moved since at the current speed. Waveforms use
+    /// this so they move evenly with the screen's frames.
+    var smoothPlayhead: Double {
+        let dt = min(max(DeckTelemetry.now - stamp, 0), 0.03)
+        return playhead + pitch * dt
+    }
+
+    /// The playhead at the moment a frame will be shown (its timeline date),
+    /// so every frame moves exactly as far as time has passed.
+    func playhead(at frame: Date) -> Double {
+        let lead = frame.timeIntervalSinceNow                  // frame time ahead of now
+        let dt = min(max(DeckTelemetry.now + lead - stamp, 0), 0.05)
+        return playhead + pitch * dt
+    }
+
+    static var now: Double { Double(DispatchTime.now().uptimeNanoseconds) / 1e9 }
 }
 
 nonisolated final class DeckEngine: @unchecked Sendable {
@@ -464,7 +484,8 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             signal: decoder.envelope,
             activeConfig: Int32(active),
             validBits: Int32(decoder.validBits),
-            coasting: coasting)
+            coasting: coasting,
+            stamp: DeckTelemetry.now)
     }
 
     /// The input level fell away at once while the record was turning

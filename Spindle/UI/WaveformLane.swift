@@ -17,8 +17,9 @@ struct WaveformLane: View {
     var window: Double = 6
 
     var body: some View {
-        TimelineView(.animation) { _ in
-            let playhead = telemetry?.pointee.playhead ?? 0
+        TimelineView(.animation) { timeline in
+            let playhead = telemetry?.pointee.playhead(at: timeline.date) ?? 0
+            let _ = deck.id == 0 ? JitterProbe.record(frame: timeline.date, playhead: playhead) : ()
             Canvas { context, size in
                 draw(context: context, size: size, playhead: playhead)
             }
@@ -146,7 +147,7 @@ struct TrackOverview: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { _ in
-            let playhead = telemetry?.pointee.playhead ?? 0
+            let playhead = telemetry?.pointee.smoothPlayhead ?? 0
             Canvas { context, size in
                 guard let track = deck.track, !track.peaks.isEmpty, track.duration > 0 else { return }
                 let playedX = CGFloat(playhead / track.duration) * size.width

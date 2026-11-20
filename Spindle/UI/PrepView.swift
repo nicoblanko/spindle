@@ -176,20 +176,23 @@ private struct PrepEditor: View {
             .disabled(page.preview == nil)
             .help("Play / pause (space)")
 
-            TimelineView(.animation(minimumInterval: 1 / 20, paused: !page.playing)) { _ in
+            // Drawn into a canvas so the changing numbers don't re-lay out
+            // the window every frame.
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: !page.playing)) { _ in
                 let t = model.prepPosition
                 let beat = prep.beatIndex(at: t)
                 let whole = Int(beat.rounded(.down))
                 let bar = Int((Double(whole) / 4).rounded(.down)) + 1
                 let inBar = ((whole % 4) + 4) % 4 + 1
-                HStack(spacing: Theme.space3) {
-                    Text("\(Self.clock(t)) / \(Self.clock(model.prepDuration))")
-                        .font(Theme.readout).foregroundStyle(Theme.ink)
-                    Text("bar \(bar).\(inBar)")
-                        .font(Theme.readout).foregroundStyle(Theme.inkMuted)
-                        .frame(width: 90, alignment: .leading)
+                let total = Self.clock(model.prepDuration)
+                Canvas { context, size in
+                    context.draw(Text("\(Self.clock(t)) / \(total)").font(Theme.readout).foregroundStyle(Theme.ink),
+                                 at: CGPoint(x: 0, y: size.height / 2), anchor: .leading)
+                    context.draw(Text("bar \(bar).\(inBar)").font(Theme.readout).foregroundStyle(Theme.inkMuted),
+                                 at: CGPoint(x: 190, y: size.height / 2), anchor: .leading)
                 }
             }
+            .frame(width: 280, height: 24)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(url.deletingPathExtension().lastPathComponent)
@@ -535,8 +538,8 @@ private struct PrepLane: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 let color = Theme.prep
-                TimelineView(.animation(paused: !page.playing)) { _ in
-                    let t = model.prepPosition
+                TimelineView(.animation(paused: !page.playing)) { timeline in
+                    let t = model.prepPosition(at: timeline.date)
                     Canvas { context, size in draw(context, size, playhead: t, color: color) }
                 }
                 WaveformInteraction(

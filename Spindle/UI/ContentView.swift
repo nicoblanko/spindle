@@ -94,6 +94,24 @@ extension ContentView {
             spindleLog.notice("\(DeckEngine.loopTest())")
             return
         }
+        if ProcessInfo.processInfo.environment["SPINDLE_JITTER"] != nil {
+            // Jitter check: play deck A on Mix and measure how evenly it moves.
+            try? await Task.sleep(for: .seconds(4))
+            model.page = .mix
+            let tracks = model.library.tracks
+            guard tracks.count > 1 else { return }
+            await model.load(url: tracks[0].url, into: model.decks[0])
+            model.setPlaying(true, deck: model.decks[0])
+            try? await Task.sleep(for: .seconds(1))
+            JitterProbe.on = true
+            try? await Task.sleep(for: .seconds(6))
+            JitterProbe.on = false
+            model.setPlaying(false, deck: model.decks[0])
+            // The lane shows deck.laneWindow seconds across its width.
+            let width = Double(NSApp.windows.first?.frame.width ?? 1400) / 2
+            spindleLog.notice("\(JitterProbe.report(pointsPerSecond: width / model.decks[0].laneWindow, rate: 1 + model.decks[0].tempo))")
+            return
+        }
         if ProcessInfo.processInfo.environment["SPINDLE_PREPLAG"] != nil {
             // Lag check: step through Prep's list like holding the down arrow.
             try? await Task.sleep(for: .seconds(4))
