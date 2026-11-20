@@ -441,8 +441,10 @@ private struct PrepEditor: View {
                 Button("+") { model.prepEdit { $0.bpm += 0.01 } }.help("+0.01 BPM")
                 Button("−1") { model.prepEdit { $0.bpm -= 1 } }
                 Button("+1") { model.prepEdit { $0.bpm += 1 } }
-                Button("÷2") { model.prepEdit { $0.bpm /= 2 } }
-                Button("×2") { model.prepEdit { $0.bpm *= 2 } }
+                Button("÷2") { model.prepEdit { if $0.bpm / 2 >= 50 { $0.bpm /= 2 } } }
+                    .disabled(prep.bpm / 2 < 50)
+                Button("×2") { model.prepEdit { if $0.bpm * 2 <= 220 { $0.bpm *= 2 } } }
+                    .disabled(prep.bpm * 2 > 220)
             }
             HStack(spacing: 3) {
                 Button { model.prepEdit { $0.gridOffset -= 0.005 } } label: { Image(systemName: "chevron.left") }

@@ -242,6 +242,25 @@ nonisolated enum TrackAnalyzer {
             if s > bestScore { bestScore = s; best = bpm }
             bpm += 0.1
         }
+        // The prior only settles half / double. A 3:2 neighbour (a breakbeat
+        // at 162 read as 108) is decided by the audio alone:
+        // whichever pulse the onsets repeat at more strongly.
+        func peak(near bpm: Double) -> (bpm: Double, score: Double) {
+            var b = max(minBPM, bpm - 1.5), top = (bpm: bpm, score: -Double.infinity)
+            while b <= min(maxBPM, bpm + 1.5) {
+                let s = score(b)
+                if s > top.score { top = (b, s) }
+                b += 0.1
+            }
+            return top
+        }
+        let here = score(best)
+        // Only upwards: a 160–175 break is the case the prior gets wrong;
+        // taking techno down to 85–95 was wrong far more often than right.
+        if best * 1.5 <= maxBPM {
+            let other = peak(near: best * 1.5)
+            if other.score > here { best = other.bpm }
+        }
 
         // 2. Fine: 16 beats of lag pin the tempo to ~0.02 BPM.
         func fine(_ bpm: Double) -> Double {

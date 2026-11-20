@@ -189,6 +189,45 @@ extension AppModel {
         if let url = prepPage.selected { _ = url; syncPreviewGrid() }
     }
 
+    /// One-off: tracks whose grid was read at ⅔ of their real tempo (a
+    /// 162 BPM break read as 108), or pushed out of range with ×2 / ÷2,
+    /// get the real tempo; your cues and loop
+    /// slots keep their place in the audio and snap to the new grid.
+    func fixBreakTemposOnce() async {
+        let key = "tempoFix3to2b"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        let todo = library.allTracks.map(\.url).compactMap { url in prep.prep(for: url).map { (url, $0.bpm) } }
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Spindle/prep.json")
+        try? FileManager.default.copyItem(at: file, to: SafeWrite.backupFolder.appendingPathComponent("prep before tempo fix.json"))
+        var fixed: [String] = []
+        await withTaskGroup(of: (URL, TrackPrep?).self) { group in
+            var iterator = todo.makeIterator()
+            func addNext() {
+                guard let (url, old) = iterator.next() else { return }
+                group.addTask(priority: .utility) {
+                    guard let mono = try? TrackAnalyzer.decodeMono(url: url) else { return (url, nil) }
+                    let onset = TrackAnalyzer.OnsetFeatures(samples: mono, sampleRate: TrackAnalyzer.sampleRate)
+                    let bpm = TrackAnalyzer.estimateTempo(onset.full, frameRate: onset.frameRate)
+                    // Read at ⅔ tempo, or doubled / halved out of any real range.
+                    guard abs(bpm / old - 1.5) < 0.02 || old > 220 || old < 50 else { return (url, nil) }
+                    return (url, try? PrepAnalyzer.suggest(url: url, bpm: bpm).prep)
+                }
+            }
+            for _ in 0..<4 { addNext() }
+            while let (url, fresh) = await group.next() {
+                if let fresh, let old = prep.prep(for: url) {
+                    prep.set(Self.regrid(old, to: fresh), for: url)
+                    fixed.append("\(url.lastPathComponent) \(old.bpm) → \(fresh.bpm)")
+                }
+                addNext()
+            }
+        }
+        UserDefaults.standard.set(true, forKey: key)
+        spindleLog.notice("Tempo fix: \(fixed.count) tracks: \(fixed.joined(separator: "; "))")
+        if prepPage.selected != nil { syncPreviewGrid() }
+    }
+
     /// The old prep on the fresh grid: same tempo → everything shifts by the
     /// grid's move (less than half a beat); new tempo → everything snaps to
     /// the new grid. Suggested cues that were never moved take the fresh

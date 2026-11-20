@@ -21,7 +21,7 @@ nonisolated struct StoredAnalysis: Codable, Sendable {
 
 @Observable
 final class AnalysisStore {
-    nonisolated static let version = 1
+    nonisolated static let version = 2   // 2: breaks no longer read at ⅔ tempo
 
     private(set) var results: [String: TrackAnalysis] = [:]
     private(set) var pending = 0

@@ -206,6 +206,7 @@ final class AppModel {
         await analysis.analyze(library.allTracks.map(\.url))
         await prepareAll()
         await regridIfNeeded()
+        await fixBreakTemposOnce()
         clearSuggestedCuesOnce()
     }
 
