@@ -52,7 +52,30 @@ extension AppModel {
             if let old { retire(old.samples) }
             syncPreviewGrid()
             syncPreviewFX()
+            if let f = prepPage.playWhenLoaded {
+                prepPage.playWhenLoaded = nil
+                prepPage.cursor = f * track.duration
+                prepSetPlaying(true)
+            }
         }
+    }
+
+    /// Organize's listen buttons: plays `url` on the pre-listen player (the
+    /// same one as Mark, so Mark opens on it), from `fraction` of the way in,
+    /// or toggles play when no point is given.
+    func listen(_ url: URL, at fraction: Double?) {
+        if prepPage.selected == url, prepPage.preview?.url == url {
+            if let fraction {
+                prepSeek(to: fraction * prepDuration)
+                if !prepPage.playing { prepSetPlaying(true) }
+            } else {
+                prepTogglePlay()
+            }
+            return
+        }
+        if prepPage.playing { prepSetPlaying(false) }
+        prepPage.playWhenLoaded = fraction ?? 0
+        selectForPrep(url)
     }
 
     /// Hands the track to a newly started engine.

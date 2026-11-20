@@ -131,6 +131,8 @@ final class AppModel {
     let library = LibraryModel()
     let analysis = AnalysisStore()
     let prep = PrepStore()
+    /// Tiny whole-track waveforms for the Organize list.
+    let overviews = OverviewStore()
     /// Ratings and notes.
     let meta = TrackMetaStore()
     /// Your own fields on the Organize grid.

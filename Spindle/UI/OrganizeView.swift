@@ -89,10 +89,11 @@ struct OrganizeView: View {
                 grid
                     .frame(minHeight: 200)
             }
-            OrganizePanel(model: model, library: library)
-                .frame(width: 400)
+            AlbumArtPanel(model: model)
+                .frame(width: 320)
         }
         .background(Theme.line)
+        .onDisappear { model.prepSetPlaying(false) }
     }
 
     private var toolbar: some View {
@@ -252,7 +253,9 @@ struct OrganizeView: View {
             view: viewBinding,
             mixes: { _ in false },
             menu: { AnyView(contextMenu($0)) },
-            dimmed: dimmedInSet)
+            dimmed: dimmedInSet,
+            leading: { AnyView(ListenCell(model: model, url: $0.track.url)) },
+            leadingWidth: ListenCell.width)
         .overlay {
             if dropTargeted { Rectangle().strokeBorder(Theme.accent, lineWidth: 2) }
         }
@@ -935,5 +938,95 @@ struct CrateList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Organize's listen column: play / pause and the whole track as a tiny
+/// waveform. Click or drag on the waveform to play from there.
+struct ListenCell: View {
+    let model: AppModel
+    let url: URL
+    static let width: CGFloat = 150
+
+    var body: some View {
+        let page = model.prepPage
+        let current = page.selected == url
+        let playing = current && (page.playing || page.playWhenLoaded != nil)
+        HStack(spacing: 4) {
+            Button { model.listen(url, at: nil) } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 9))
+                    .frame(width: 20, height: 20)
+                    .foregroundStyle(playing ? Theme.ink : Theme.inkMuted)
+                    .background(current ? Theme.control : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(playing ? "Pause" : "Pre-listen")
+            MiniWaveform(model: model, url: url, current: current, playing: page.playing && current)
+        }
+        .padding(.horizontal, 6)
+        .task(id: url) { model.overviews.request(url) }
+    }
+}
+
+private struct MiniWaveform: View {
+    let model: AppModel
+    let url: URL
+    let current: Bool
+    let playing: Bool
+
+    var body: some View {
+        let data = model.overviews.overview(for: url)
+        GeometryReader { geo in
+            TimelineView(.periodic(from: .now, by: playing ? 1.0 / 15 : 3600)) { _ in
+                let progress = current && model.prepDuration > 0 ? model.prepPosition / model.prepDuration : -1
+                Canvas { context, size in draw(context, size, data, progress) }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                let f = min(max(g.location.x / max(geo.size.width, 1), 0), 1)
+                if current, model.prepPage.preview?.url == url { model.prepSeek(to: f * model.prepDuration) }
+            }.onEnded { g in
+                model.listen(url, at: min(max(g.location.x / max(geo.size.width, 1), 0), 0.999))
+            })
+        }
+        .frame(height: 22)
+    }
+
+    private func draw(_ context: GraphicsContext, _ size: CGSize, _ data: TrackOverviewData?, _ progress: Double) {
+        let mid = size.height / 2, half = size.height / 2
+        guard let data, data.peak.count > 1 else {
+            context.fill(Path(CGRect(x: 0, y: mid - 0.5, width: size.width, height: 1)), with: .color(Theme.line))
+            return
+        }
+        let n = data.peak.count
+        let px = size.width * CGFloat(max(progress, 0))
+        func shape(_ v: Data) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: 0, y: mid))
+            for i in 0..<n {
+                let x = CGFloat(i) / CGFloat(n - 1) * size.width
+                p.addLine(to: CGPoint(x: x, y: mid - max(0.5, CGFloat(v[i]) / 255 * half)))
+            }
+            for i in (0..<n).reversed() {
+                let x = CGFloat(i) / CGFloat(n - 1) * size.width
+                p.addLine(to: CGPoint(x: x, y: mid + max(0.5, CGFloat(v[i]) / 255 * half)))
+            }
+            p.closeSubpath()
+            return p
+        }
+        let peak = shape(data.peak), loud = shape(data.loud)
+        let ahead = current ? Theme.inkMuted : Theme.inkFaint
+        context.fill(peak, with: .color(ahead.opacity(0.45)))
+        context.fill(loud, with: .color(ahead))
+        if progress >= 0 {
+            var played = context
+            played.clip(to: Path(CGRect(x: 0, y: 0, width: px, height: size.height)))
+            played.fill(peak, with: .color(Theme.prep.opacity(0.45)))
+            played.fill(loud, with: .color(Theme.prep))
+            context.fill(Path(CGRect(x: px - 0.5, y: 0, width: 1, height: size.height)), with: .color(Theme.accent))
+        }
     }
 }

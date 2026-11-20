@@ -30,6 +30,8 @@ final class PrepPageModel {
     /// The selected track decoded for playback (and its detailed waveform).
     var preview: LoadedTrack?
     var playing = false
+    /// Start playing here (a fraction of the track) once it has loaded.
+    var playWhenLoaded: Double?
     var metronome = false
     var volume: Double = 0.8
     /// The loop slot looping in the player, if any.
