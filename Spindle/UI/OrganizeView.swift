@@ -732,8 +732,8 @@ struct CrateList: View {
         .padding(.vertical, 5)
         .background(selected ? Theme.accentSoft : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { draft = v.name; renaming = v.id }
         .onTapGesture { model.applyView(v.id) }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { draft = v.name; renaming = v.id })
         .help(v.settings.summary(model.records))
         .contextMenu {
             Button("Rename") { draft = v.name; renaming = v.id }
@@ -855,8 +855,11 @@ struct CrateList: View {
         .background(selected ? Theme.accentSoft : (dropTarget == tag.id ? Theme.panelRaised : Color.clear))
         .overlay { if dropTarget == tag.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) } }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { draft = tag.name; renaming = tag.id }
         .onTapGesture { if selected { model.organizeView.conditions = [] } else { showTag(tag) } }
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            if !isShowing(tag) { showTag(tag) }        // the second click toggled it off
+            draft = tag.name; renaming = tag.id
+        })
         .help("Show tracks with this tag. Drag tracks here to tag them.")
         .dropDestination(for: URL.self) { urls, _ in
             tagStore.set(tag.id, on: PlaylistStore.audioFiles(in: urls).map(\.path), true)
@@ -894,8 +897,8 @@ struct CrateList: View {
         .padding(.vertical, 5)
         .background(selected ? Theme.accentSoft : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { editingGroup = tag }
         .onTapGesture { library.tag = tag.id }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { editingGroup = tag })
         .help(tag.rule.map { "Tempo group: \($0.summary). Tracks join by themselves." } ?? "")
         .contextMenu {
             Button("Edit range…") { editingGroup = tag }
@@ -965,10 +968,12 @@ struct CrateList: View {
             if dropTarget == node.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) }
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { draft = node.name; renaming = node.id }
         .onTapGesture {
             if opensSets && !node.isFolder { model.openSet = node.id } else { library.playlist = node.id }
         }
+        // Acts on the first click; a double-click renames (onTapGesture(count: 2)
+        // made every single click wait ~0.3 s).
+        .simultaneousGesture(TapGesture(count: 2).onEnded { draft = node.name; renaming = node.id })
         .dropDestination(for: URL.self) { urls, _ in
             guard !node.isFolder else { return false }
             model.addToPlaylist(urls, playlist: node.id)
