@@ -861,8 +861,9 @@ struct CrateList: View {
 
     /// The thin line above each library section.
     private var sectionDivider: some View {
+        // Edge to edge: the headers' side padding is undone here.
         Rectangle().fill(Theme.line).frame(height: 1)
-            .padding(.horizontal, Theme.space3)
+            .padding(.horizontal, -Theme.space3)
             .padding(.top, Theme.space2)
     }
 
