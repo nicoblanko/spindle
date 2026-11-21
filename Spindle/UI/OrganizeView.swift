@@ -83,12 +83,15 @@ struct OrganizeView: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            CrateList(library: library, model: model)
+            CrateList(library: library, model: model, keys: keys)
                 .frame(width: 210)
+                .simultaneousGesture(TapGesture().onEnded { keys.focus = .library })
             VStack(spacing: 1) {
                 toolbar
                 grid
                     .frame(minHeight: 200)
+                    .overlay(alignment: .top) { if keys.focus == .tracks { Theme.accent.frame(height: 2) } }
+                    .simultaneousGesture(TapGesture().onEnded { keys.focus = .tracks })
             }
             if showArt {
                 AlbumArtPanel(model: model)
@@ -497,7 +500,10 @@ struct CrateList: View {
     let model: AppModel
     /// Organize: clicking a set opens it in the right panel (the list stays).
     var opensSets = false
+    /// Organize's keys: the list hands them its rows, in order.
+    var keys: OrganizeKeys?
     @State private var renaming: UUID?
+    @FocusState private var renameFocus: Bool
     @State private var draft = ""
     @State private var collapsed = Set<UUID>()
     @State private var dropTarget: UUID?
@@ -510,7 +516,45 @@ struct CrateList: View {
 
     private var store: PlaylistStore { library.playlists }
 
+    /// Every row the arrow keys can reach, top to bottom.
+    private var navItems: [LibraryNavItem] {
+        var items: [LibraryNavItem] = []
+        items.append(.init(selected: library.crate == nil && library.playlist == nil && library.tag == nil && library.smart == nil,
+                           activate: { library.selectAll() }))
+        for smart in LibraryModel.SmartList.allCases {
+            items.append(.init(selected: library.smart == smart, activate: { library.smart = smart }))
+        }
+        if showFolders {
+            for crate in library.crates {
+                items.append(.init(selected: library.crate == crate, activate: { library.crate = crate }))
+            }
+        }
+        func walk(_ parent: UUID?) {
+            for node in store.children(of: parent) {
+                let open = node.isFolder && !collapsed.contains(node.id)
+                items.append(.init(selected: library.playlist == node.id,
+                                   activate: { library.playlist = node.id },
+                                   rename: { draft = node.name; renaming = node.id },
+                                   expand: node.isFolder ? { on in
+                                       if on { collapsed.remove(node.id) } else { collapsed.insert(node.id) }
+                                   } : nil))
+                if open { walk(node.id) }
+            }
+        }
+        walk(nil)
+        for tag in tagStore.manualTags {
+            let showing = isShowing(tag)
+            items.append(.init(selected: showing, activate: { if !isShowing(tag) { showTag(tag) } },
+                               rename: { draft = tag.name; renaming = tag.id }))
+        }
+        for tag in tagStore.tempoGroups {
+            items.append(.init(selected: library.tag == tag.id, activate: { library.tag = tag.id }))
+        }
+        return items
+    }
+
     var body: some View {
+        let _ = keys?.libraryItems = navItems
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -573,6 +617,13 @@ struct CrateList: View {
         }
         .frame(maxHeight: .infinity)
         .background(Theme.panel)
+        .overlay(alignment: .top) {
+            // Which pane the keys work in (press 1 or 2).
+            if keys?.focus == .library { Theme.accent.frame(height: 2) }
+        }
+        .onChange(of: renameFocus) { _, focused in
+            if !focused { renaming = nil; DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) } }
+        }
         .confirmationDialog("Delete \(pendingDelete?.name ?? "")?", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
             Button("Delete", role: .destructive) {
@@ -787,6 +838,8 @@ struct CrateList: View {
                         renaming = nil
                     }
                     .onExitCommand { renaming = nil }
+                    .focused($renameFocus)
+                    .onAppear { renameFocus = true }
             } else {
                 Pill(name: tag.name, color: tag.color)
             }
@@ -893,6 +946,8 @@ struct CrateList: View {
                     .font(Theme.body)
                     .onSubmit { store.rename(node.id, to: draft); renaming = nil }
                     .onExitCommand { renaming = nil }
+                    .focused($renameFocus)
+                    .onAppear { renameFocus = true }
             } else {
                 Text(node.name).font(Theme.body).lineLimit(1)
             }
@@ -1056,6 +1111,11 @@ private struct MiniWaveform: View {
 /// ← → skip 10 seconds.
 @Observable
 final class OrganizeKeys {
+    enum Pane { case library, tracks }
+    /// Where the arrow keys work: 1 = library, 2 = track list.
+    var focus: Pane = .tracks
+    /// The library's rows, top to bottom, refreshed on every redraw.
+    @ObservationIgnored var libraryItems: [LibraryNavItem] = []
     /// The row to keep in view (moved to with the arrow keys).
     var follow: URL?
     /// Rows in display order, refreshed on every redraw.
@@ -1092,6 +1152,13 @@ final class OrganizeKeys {
         let current = follow.flatMap { selection.contains($0) ? $0 : nil } ?? order.first(where: selection.contains)
 
         switch event.keyCode {
+        case 18: focus = .library; return true            // 1
+        case 19: focus = .tracks; return true             // 2
+        default: break
+        }
+        if focus == .library, handleLibrary(event) { return true }
+
+        switch event.keyCode {
         case 125, 126:                                    // ↓ ↑
             guard !order.isEmpty else { return true }
             let step = event.keyCode == 125 ? 1 : -1
@@ -1108,4 +1175,38 @@ final class OrganizeKeys {
         }
         return true
     }
+
+    /// Library pane: ↑ ↓ move and show that list, Return renames,
+    /// ← → close and open folders.
+    private func handleLibrary(_ event: NSEvent) -> Bool {
+        let items = libraryItems
+        guard !items.isEmpty else { return false }
+        let current = items.firstIndex(where: \.selected)
+        switch event.keyCode {
+        case 125, 126:
+            let step = event.keyCode == 125 ? 1 : -1
+            let next = current.map { min(max($0 + step, 0), items.count - 1) } ?? 0
+            items[next].activate()
+            return true
+        case 36, 76:                                      // Return
+            guard let current, let rename = items[current].rename else { return false }
+            rename()
+            return true
+        case 123, 124:                                    // ← →
+            guard let current, let expand = items[current].expand else { return false }
+            expand(event.keyCode == 124)
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+/// One row of the library list, for the keys.
+struct LibraryNavItem {
+    var selected: Bool
+    var activate: () -> Void
+    var rename: (() -> Void)? = nil
+    /// Folders: open (true) or close (false).
+    var expand: ((Bool) -> Void)? = nil
 }
