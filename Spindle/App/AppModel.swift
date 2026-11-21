@@ -264,6 +264,7 @@ final class AppModel {
         library.analysisLookup = { analysis.analysis(for: $0) }
         let prep = prep
         library.isPrepped = { prep.prep(for: $0)?.mixReady == true }
+        library.isColored = { [meta] in meta.color($0) != nil }
     }
 
     func refreshDevices() {

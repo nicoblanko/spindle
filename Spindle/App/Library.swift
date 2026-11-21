@@ -49,18 +49,22 @@ final class LibraryModel {
     var isPrepped: (URL) -> Bool = { _ in false }
 
     enum SmartList: String, CaseIterable, Identifiable {
-        case notPrepped = "Not marked", untagged = "Untagged", inNoSet = "In no set"
+        case marked = "Marked", tagged = "Tagged", inSet = "In a set", colored = "Coloured"
         var id: String { rawValue }
     }
+
+    /// Whether a track has a row colour (set by the app).
+    var isColored: (String) -> Bool = { _ in false }
 
     /// Music-folder tracks in a smart list.
     func tracks(in smart: SmartList) -> [LibraryTrack] {
         switch smart {
-        case .notPrepped: return tracks.filter { !isPrepped($0.url) }
-        case .untagged: return tracks.filter { tags.ids(for: $0.url.path).isEmpty }
-        case .inNoSet:
+        case .marked: return tracks.filter { isPrepped($0.url) }
+        case .tagged: return tracks.filter { !tags.ids(for: $0.url.path).isEmpty }
+        case .inSet:
             let inSets = playlists.allTrackPaths
-            return tracks.filter { !inSets.contains($0.url.path) }
+            return tracks.filter { inSets.contains($0.url.path) }
+        case .colored: return tracks.filter { isColored($0.url.path) }
         }
     }
     var search = ""

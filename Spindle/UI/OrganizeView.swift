@@ -511,6 +511,14 @@ struct CrateList: View {
     var keys: OrganizeKeys?
     @State private var renaming: UUID?
     @FocusState private var renameFocus: Bool
+    /// Sections you closed (by title), remembered between launches.
+    @AppStorage("organize.closedSections") private var closedSections = ""
+    private func isOpen(_ section: String) -> Bool { !closedSections.split(separator: "|").contains(Substring(section)) }
+    private func toggleSection(_ section: String) {
+        var set = Set(closedSections.split(separator: "|").map(String.init))
+        if set.contains(section) { set.remove(section) } else { set.insert(section) }
+        closedSections = set.sorted().joined(separator: "|")
+    }
     @State private var draft = ""
     @State private var collapsed = Set<UUID>()
     @State private var dropTarget: UUID?
@@ -526,6 +534,7 @@ struct CrateList: View {
     /// Every row the arrow keys can reach, top to bottom.
     private var navItems: [LibraryNavItem] {
         var items: [LibraryNavItem] = []
+        if isOpen("Library") {
         items.append(.init(selected: library.crate == nil && library.playlist == nil && library.tag == nil && library.smart == nil,
                            activate: { library.selectAll() }))
         for smart in LibraryModel.SmartList.allCases {
@@ -535,6 +544,7 @@ struct CrateList: View {
             for crate in library.crates {
                 items.append(.init(selected: library.crate == crate, activate: { library.crate = crate }))
             }
+        }
         }
         func walk(_ parent: UUID?) {
             for node in store.children(of: parent) {
@@ -548,13 +558,13 @@ struct CrateList: View {
                 if open { walk(node.id) }
             }
         }
-        walk(nil)
-        for tag in tagStore.manualTags {
+        if isOpen("Sets") { walk(nil) }
+        for tag in tagStore.manualTags where isOpen("Tags") {
             let showing = isShowing(tag)
             items.append(.init(selected: showing, activate: { if !isShowing(tag) { showTag(tag) } },
                                rename: { draft = tag.name; renaming = tag.id }))
         }
-        for node in groupTree {
+        for node in groupTree where isOpen("Tempo groups") {
             let tag = node.parent
             items.append(.init(selected: library.tag == tag.id, activate: { library.tag = tag.id },
                                rename: { editingGroup = tag },
@@ -585,6 +595,7 @@ struct CrateList: View {
                             }
                         }
                     }
+                    if isOpen("Library") {
                     plainRow(title: "All tracks", count: library.tracks.count,
                              selected: library.crate == nil && library.playlist == nil && library.tag == nil && library.smart == nil) { library.selectAll() }
                     ForEach(LibraryModel.SmartList.allCases) { smart in
@@ -610,8 +621,9 @@ struct CrateList: View {
                                      selected: library.crate == crate, icon: "folder") { library.crate = crate }.padding(.leading, 14)
                         }
                     }
+                    }
                     HStack {
-                        LabelText("Sets")
+                        sectionTitle("Sets")
                         Spacer()
                         Menu {
                             Button("New set") { create(folder: false, in: nil) }
@@ -627,8 +639,11 @@ struct CrateList: View {
                     .padding(.horizontal, Theme.space3)
                     .padding(.top, Theme.space4)
                     .padding(.bottom, Theme.space2)
-                    tree(parent: nil, depth: 0)
-                    recentlyDeleted
+                    .overlay(alignment: .top) { sectionDivider }
+                    if isOpen("Sets") {
+                        tree(parent: nil, depth: 0)
+                        recentlyDeleted
+                    }
                     tagSection
                 }
             }
@@ -777,7 +792,7 @@ struct CrateList: View {
             }
             Button("Edit tags…") { editingTags = true }
         }
-        ForEach(tagStore.manualTags) { tag in tagRow(tag) }
+        if isOpen("Tags") { ForEach(tagStore.manualTags) { tag in tagRow(tag) } }
         sectionHeader("Tempo groups") {
             Button("Make tempo groups") { makeTempoGroups() }
             Button("Make genre groups") { tagStore.makeGenreGroups() }
@@ -785,10 +800,12 @@ struct CrateList: View {
                 editingGroup = TagDef(name: "", colorIndex: tagStore.tempoGroups.count, rule: TagRule())
             }
         }
-        ForEach(groupTree, id: \.parent.id) { node in
-            groupRow(node.parent, children: node.children.count)
-            if !collapsed.contains(node.parent.id) {
-                ForEach(node.children) { child in groupRow(child, depth: 1) }
+        if isOpen("Tempo groups") {
+            ForEach(groupTree, id: \.parent.id) { node in
+                groupRow(node.parent, children: node.children.count)
+                if !collapsed.contains(node.parent.id) {
+                    ForEach(node.children) { child in groupRow(child, depth: 1) }
+                }
             }
         }
         EmptyView()
@@ -813,9 +830,21 @@ struct CrateList: View {
             }
     }
 
+    /// A section title that opens and closes the section.
+    private func sectionTitle(_ title: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: isOpen(title) ? "chevron.down" : "chevron.right")
+                .font(.system(size: 8, weight: .bold)).foregroundStyle(Theme.inkFaint).frame(width: 8)
+            LabelText(title)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { toggleSection(title) }
+        .help(isOpen(title) ? "Close \(title.lowercased())" : "Open \(title.lowercased())")
+    }
+
     private func sectionHeader<M: View>(_ title: String, icon: String = "plus", @ViewBuilder menu: () -> M) -> some View {
         HStack {
-            LabelText(title)
+            sectionTitle(title)
             Spacer()
             Menu { menu() } label: {
                 Image(systemName: icon).font(.system(size: 11, weight: .semibold))
@@ -827,6 +856,14 @@ struct CrateList: View {
         .padding(.horizontal, Theme.space3)
         .padding(.top, title == "Library" ? Theme.space2 : Theme.space4)
         .padding(.bottom, Theme.space2)
+        .overlay(alignment: .top) { if title != "Library" { sectionDivider } }
+    }
+
+    /// The thin line above each library section.
+    private var sectionDivider: some View {
+        Rectangle().fill(Theme.line).frame(height: 1)
+            .padding(.horizontal, Theme.space3)
+            .padding(.top, Theme.space2)
     }
 
     /// Clicking a tag filters the grid to tracks that have it (Airtable's
