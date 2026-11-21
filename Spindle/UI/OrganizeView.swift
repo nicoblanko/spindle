@@ -82,7 +82,7 @@ struct OrganizeView: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            CrateList(library: library, model: model, opensSets: true)
+            CrateList(library: library, model: model)
                 .frame(width: 210)
             VStack(spacing: 1) {
                 toolbar
@@ -95,6 +95,7 @@ struct OrganizeView: View {
         .background(Theme.line)
         .onAppear {
             keys.install(model)
+            model.openSet = nil       // the Set panel is gone; it only greyed rows
             // Don't start with the cursor in the search field.
             DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
         }
