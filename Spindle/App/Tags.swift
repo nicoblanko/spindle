@@ -199,12 +199,14 @@ final class TagStore {
     /// tracks mix with a small tempo change. Groups need `minimum` tracks.
     func makeTempoGroups(bpms: [Double], span: Double = 0.04, minimum: Int = 3) {
         tags.removeAll { $0.automatic }
-        // Fold every tempo into one octave (85…170) so half and double time
+        // Fold every tempo into one octave (100…200) so half and double time
         // land together, then split that into ranges no wider than `span`.
+        // The fold sits at 100/200, where no genre lives, so drum & bass
+        // stays whole and hip-hop joins it at double time.
         func fold(_ b: Double) -> Double {
             var b = b
-            while b < 85 { b *= 2 }
-            while b >= 170 { b /= 2 }
+            while b < 100 { b *= 2 }
+            while b >= 200 { b /= 2 }
             return b
         }
         let real = bpms.filter { $0 > 0 }

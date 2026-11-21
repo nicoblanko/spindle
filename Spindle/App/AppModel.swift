@@ -211,6 +211,20 @@ final class AppModel {
         await regridIfNeeded()
         await fixBreakTemposOnce()
         clearSuggestedCuesOnce()
+        makeTempoGroupsOnce()
+    }
+
+    /// Once: the genre groups plus fresh automatic groups (4%, half/double
+    /// time), from the analysed BPMs.
+    func makeTempoGroupsOnce() {
+        let key = "tempoGroups4pctB"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        let bpms = library.allTracks.compactMap { analysis.analysis(for: $0.url)?.bpm }
+        guard !bpms.isEmpty else { return }
+        library.tags.makeGenreGroups()
+        library.tags.makeTempoGroups(bpms: bpms)
+        UserDefaults.standard.set(true, forKey: key)
+        spindleLog.notice("Tempo groups: \(self.library.tags.tempoGroups.map { "\($0.name) (\(self.library.tracks(withTag: $0.id).count))" }.joined(separator: ", "))")
     }
 
     /// You place cues and loop slots yourself: once, clear the ones Spindle

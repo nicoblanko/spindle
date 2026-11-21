@@ -554,9 +554,19 @@ struct CrateList: View {
             items.append(.init(selected: showing, activate: { if !isShowing(tag) { showTag(tag) } },
                                rename: { draft = tag.name; renaming = tag.id }))
         }
-        for tag in tagStore.tempoGroups {
+        for node in groupTree {
+            let tag = node.parent
             items.append(.init(selected: library.tag == tag.id, activate: { library.tag = tag.id },
-                               rename: { editingGroup = tag }))
+                               rename: { editingGroup = tag },
+                               expand: node.children.isEmpty ? nil : { on in
+                                   if on { collapsed.remove(tag.id) } else { collapsed.insert(tag.id) }
+                               }))
+            if !collapsed.contains(tag.id) {
+                for child in node.children {
+                    items.append(.init(selected: library.tag == child.id, activate: { library.tag = child.id },
+                                       rename: { editingGroup = child }))
+                }
+            }
         }
         return items
     }
@@ -775,7 +785,12 @@ struct CrateList: View {
                 editingGroup = TagDef(name: "", colorIndex: tagStore.tempoGroups.count, rule: TagRule())
             }
         }
-        ForEach(tagStore.tempoGroups) { tag in groupRow(tag) }
+        ForEach(groupTree, id: \.parent.id) { node in
+            groupRow(node.parent, children: node.children.count)
+            if !collapsed.contains(node.parent.id) {
+                ForEach(node.children) { child in groupRow(child, depth: 1) }
+            }
+        }
         EmptyView()
             .sheet(item: $editingGroup) { group in
                 TempoGroupEditor(group: group, library: library) { saved in
@@ -885,12 +900,42 @@ struct CrateList: View {
         }
     }
 
-    private func groupRow(_ tag: TagDef) -> some View {
+    /// Tempo groups as folders: each group you made (or a genre group) holds
+    /// the automatic groups whose middle tempo falls in its range; automatic
+    /// groups that fit nowhere stand on their own.
+    private var groupTree: [(parent: TagDef, children: [TagDef])] {
+        let groups = tagStore.tempoGroups
+        let parents = groups.filter { !$0.automatic }
+        var nodes = parents.map { (parent: $0, children: [TagDef]()) }
+        var loose: [TagDef] = []
+        for auto in groups where auto.automatic {
+            guard let r = auto.rule else { continue }
+            let mid = (r.minBPM + r.maxBPM) / 2
+            let home = parents.firstIndex { p in
+                guard let pr = p.rule else { return false }
+                return [mid, mid / 2, mid * 2].contains { $0 >= pr.minBPM && $0 <= pr.maxBPM }
+            }
+            if let home { nodes[home].children.append(auto) } else { loose.append(auto) }
+        }
+        let all = nodes + loose.map { (parent: $0, children: [TagDef]()) }
+        return all.sorted { ($0.parent.rule?.minBPM ?? 0) < ($1.parent.rule?.minBPM ?? 0) }
+    }
+
+    private func groupRow(_ tag: TagDef, depth: Int = 0, children: Int = 0) -> some View {
         let selected = library.tag == tag.id
         let count = library.tracks(withTag: tag.id).count
         return HStack(spacing: Theme.space1) {
-            Spacer().frame(width: 10)
-            Image(systemName: "metronome").font(.system(size: 10)).frame(width: 14)
+            if children > 0 {
+                Image(systemName: collapsed.contains(tag.id) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 10)
+                    .onTapGesture {
+                        if collapsed.contains(tag.id) { collapsed.remove(tag.id) } else { collapsed.insert(tag.id) }
+                    }
+            } else {
+                Spacer().frame(width: 10)
+            }
+            Image(systemName: children > 0 ? "folder" : "metronome").font(.system(size: 10)).frame(width: 14)
             Text(tag.name).font(Theme.body).lineLimit(1)
             if let rule = tag.rule, rule.minEnergy > 1 || rule.maxEnergy < 10 || rule.minor != nil {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)
@@ -899,7 +944,7 @@ struct CrateList: View {
             Text("\(count)").font(Theme.readoutSm)
         }
         .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
-        .padding(.leading, Theme.space2)
+        .padding(.leading, Theme.space2 + CGFloat(depth) * 14)
         .padding(.trailing, Theme.space3)
         .padding(.vertical, 5)
         .background(selected ? Theme.accentSoft : Color.clear)
