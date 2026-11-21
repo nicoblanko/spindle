@@ -461,14 +461,19 @@ struct TempoGroupEditor: View {
                     .pickerStyle(.segmented)
                     .frame(width: 200)
                 }
+                GridRow {
+                    Text("Half / double").foregroundStyle(Theme.inkMuted)
+                    Toggle("Also match at half or double the tempo",
+                           isOn: Binding(get: { rule.octaves == true }, set: { v in edit { $0.octaves = v ? true : nil } }))
+                }
             }
             .font(Theme.body)
             HStack(spacing: Theme.space2) {
-                Image(systemName: rule.span <= 0.06 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(rule.span <= 0.06 ? Theme.match : Theme.warn)
-                Text(rule.span <= 0.06
+                Image(systemName: rule.span <= 0.05 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(rule.span <= 0.05 ? Theme.match : Theme.warn)
+                Text(rule.span <= 0.05
                      ? String(format: "Range %.1f%%: every track mixes with every other with a small tempo change.", rule.span * 100)
-                     : String(format: "Range %.1f%%: the outer tracks are far apart; keep it under 6%% for easy mixing.", rule.span * 100))
+                     : String(format: "Range %.1f%%: the outer tracks are far apart; keep it under 5%% to mix without audible stretching.", rule.span * 100))
                     .font(Theme.caption).foregroundStyle(Theme.inkMuted)
             }
             Text("\(matching) tracks match").font(Theme.readoutSm).foregroundStyle(Theme.ink)
@@ -550,7 +555,8 @@ struct CrateList: View {
                                rename: { draft = tag.name; renaming = tag.id }))
         }
         for tag in tagStore.tempoGroups {
-            items.append(.init(selected: library.tag == tag.id, activate: { library.tag = tag.id }))
+            items.append(.init(selected: library.tag == tag.id, activate: { library.tag = tag.id },
+                               rename: { editingGroup = tag }))
         }
         return items
     }
@@ -764,6 +770,7 @@ struct CrateList: View {
         ForEach(tagStore.manualTags) { tag in tagRow(tag) }
         sectionHeader("Tempo groups") {
             Button("Make tempo groups") { makeTempoGroups() }
+            Button("Make genre groups") { tagStore.makeGenreGroups() }
             Button("New tempo group…") {
                 editingGroup = TagDef(name: "", colorIndex: tagStore.tempoGroups.count, rule: TagRule())
             }

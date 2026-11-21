@@ -7,7 +7,11 @@
 //    • tempo groups: a rule (BPM range, optionally energy and mood) that
 //      tracks match by themselves, so new tracks fall into place
 //  "Make tempo groups" splits the library into BPM ranges no wider than
-//  6%, so any two tracks in a group mix with a small tempo change.
+//  4%, so any two tracks in a group mix without audible stretching
+//  (DJs keep tempo changes to about 3–5%). Those groups count half and
+//  double time: 87 BPM hip-hop sits with 174 BPM drum & bass.
+//  "Make genre groups" adds the usual ranges for hip-hop, house, techno
+//  and drum & bass instead.
 //  Kept in ~/Library/Application Support/Spindle/tags.json.
 //
 
@@ -22,9 +26,16 @@ nonisolated struct TagRule: Codable, Sendable, Equatable {
     var maxEnergy: Int = 10
     /// nil = any mood, true = Dark only, false = Bright only.
     var minor: Bool? = nil
+    /// Also match at half or double the tempo (87 BPM with 174).
+    var octaves: Bool? = nil
+
+    func matches(bpm: Double) -> Bool {
+        func inside(_ b: Double) -> Bool { b >= minBPM - 0.05 && b <= maxBPM + 0.05 }
+        return inside(bpm) || (octaves == true && (inside(bpm * 2) || inside(bpm / 2)))
+    }
 
     func matches(_ a: TrackAnalysis) -> Bool {
-        a.bpm >= minBPM - 0.05 && a.bpm <= maxBPM + 0.05
+        matches(bpm: a.bpm)
             && a.energy >= minEnergy && a.energy <= maxEnergy
             && (minor == nil || minor == a.keyMinor)
     }
@@ -34,6 +45,7 @@ nonisolated struct TagRule: Codable, Sendable, Equatable {
 
     var summary: String {
         var parts = [String(format: "%.0f–%.0f BPM", minBPM, maxBPM)]
+        if octaves == true { parts.append("half/double time too") }
         if minEnergy > 1 || maxEnergy < 10 { parts.append("energy \(minEnergy)–\(maxEnergy)") }
         if let minor { parts.append(KeyStyle.mood(minor: minor)) }
         return parts.joined(separator: " · ")
@@ -185,29 +197,68 @@ final class TagStore {
     /// Replaces the automatic tempo groups with fresh ones for these
     /// tempos: each group spans at most `span` (6%), so any two of its
     /// tracks mix with a small tempo change. Groups need `minimum` tracks.
-    func makeTempoGroups(bpms: [Double], span: Double = 0.06, minimum: Int = 3) {
+    func makeTempoGroups(bpms: [Double], span: Double = 0.04, minimum: Int = 3) {
         tags.removeAll { $0.automatic }
-        let sortedBPMs = bpms.filter { $0 > 0 }.sorted()
+        // Fold every tempo into one octave (85…170) so half and double time
+        // land together, then split that into ranges no wider than `span`.
+        func fold(_ b: Double) -> Double {
+            var b = b
+            while b < 85 { b *= 2 }
+            while b >= 170 { b /= 2 }
+            return b
+        }
+        let real = bpms.filter { $0 > 0 }
+        let folded = real.map(fold).sorted()
         var i = 0
         var made = 0
-        while i < sortedBPMs.count {
-            let low = sortedBPMs[i]
+        while i < folded.count {
+            let low = folded[i]
             var j = i
-            while j + 1 < sortedBPMs.count && sortedBPMs[j + 1] <= low * (1 + span) { j += 1 }
-            let count = j - i + 1
-            if count >= minimum {
-                let high = sortedBPMs[j]
+            while j + 1 < folded.count && folded[j + 1] <= low * (1 + span) { j += 1 }
+            if j - i + 1 >= minimum {
                 // Exact edges (to 0.1 BPM) so neighbouring groups don't share
-                // tracks; the name shows whole BPMs.
-                let rule = TagRule(minBPM: (low * 10).rounded(.down) / 10, maxBPM: (high * 10).rounded(.up) / 10)
-                let lo = Int(rule.minBPM.rounded()), hi = Int(rule.maxBPM.rounded())
-                var tag = TagDef(name: lo == hi ? "\(lo) BPM" : "\(lo)–\(hi) BPM",
+                // tracks; the name shows whole BPMs, and the other octave when
+                // tracks there are in it.
+                let rule = TagRule(minBPM: (low * 10).rounded(.down) / 10, maxBPM: (folded[j] * 10).rounded(.up) / 10,
+                                   octaves: true)
+                func range(_ f: Double) -> String {
+                    let lo = Int((rule.minBPM * f).rounded()), hi = Int((rule.maxBPM * f).rounded())
+                    return lo == hi ? "\(lo)" : "\(lo)–\(hi)"
+                }
+                let members = real.filter(rule.matches(bpm:))
+                var names: [String] = []
+                if members.contains(where: { $0 < rule.minBPM - 0.05 }) { names.append(range(0.5)) }
+                if members.contains(where: { $0 >= rule.minBPM - 0.05 && $0 <= rule.maxBPM + 0.05 }) { names.append(range(1)) }
+                if members.contains(where: { $0 > rule.maxBPM + 0.05 }) { names.append(range(2)) }
+                var tag = TagDef(name: (names.isEmpty ? [range(1)] : names).joined(separator: " · ") + " BPM",
                                  colorIndex: made, rule: rule)
                 tag.automatic = true
                 tags.append(tag)
                 made += 1
             }
             i = j + 1
+        }
+        save()
+    }
+
+    /// The usual tempo ranges per genre (from DJ guides; the edges vary a
+    /// few BPM between sources). Added alongside your other groups; ones
+    /// with the same name are left alone.
+    static let genreGroups: [(name: String, min: Double, max: Double)] = [
+        ("Hip-hop", 85, 100),
+        ("House / dub techno", 118, 126),
+        ("Techno", 126, 134),
+        ("Peak techno", 134, 142),
+        ("Hard techno", 142, 155),
+        ("Drum & bass", 160, 178),
+    ]
+
+    func makeGenreGroups() {
+        let have = Set(tags.filter { $0.rule != nil }.map(\.name))
+        var index = tempoGroups.count
+        for g in Self.genreGroups where !have.contains(g.name) {
+            tags.append(TagDef(name: g.name, colorIndex: index, rule: TagRule(minBPM: g.min, maxBPM: g.max)))
+            index += 1
         }
         save()
     }
