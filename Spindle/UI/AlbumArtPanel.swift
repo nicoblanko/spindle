@@ -9,6 +9,7 @@
 
 import AppKit
 import AVFoundation
+import ImageIO
 import SwiftUI
 
 struct AlbumArtPanel: View {
@@ -31,7 +32,7 @@ struct AlbumArtPanel: View {
             ZStack {
                 Rectangle().fill(Theme.panelRaised)
                 if let art {
-                    Image(nsImage: art).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    Image(nsImage: art).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
                 } else {
                     Image(systemName: "music.note").font(.system(size: 40, weight: .light)).foregroundStyle(Theme.inkFaint)
                 }
@@ -76,23 +77,39 @@ enum AlbumArt {
             case .commonKeyArtist?:
                 if let v = try? await item.load(.stringValue) { info.artist = v }
             case .commonKeyArtwork?:
-                if info.image == nil, let d = try? await item.load(.dataValue) { info.image = NSImage(data: d) }
+                if info.image == nil, let d = try? await item.load(.dataValue) { info.image = await thumbnail(d) }
             default: break
             }
         }
         if info.image == nil {
-            // A cover image next to the file.
+            // A cover image next to the file (listed off the main thread:
+            // Dropbox folders can be slow to read).
             let folder = url.deletingLastPathComponent()
-            let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-            if let name = names.first(where: {
-                let l = $0.lowercased()
-                return (l.hasPrefix("cover") || l.hasPrefix("folder") || l.hasPrefix("front")) &&
-                    (l.hasSuffix(".jpg") || l.hasSuffix(".jpeg") || l.hasSuffix(".png"))
-            }) {
-                info.image = NSImage(contentsOf: folder.appendingPathComponent(name))
-            }
+            let data: Data? = await Task.detached(priority: .utility) {
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+                guard let name = names.first(where: {
+                    let l = $0.lowercased()
+                    return (l.hasPrefix("cover") || l.hasPrefix("folder") || l.hasPrefix("front")) &&
+                        (l.hasSuffix(".jpg") || l.hasSuffix(".jpeg") || l.hasSuffix(".png"))
+                }) else { return nil }
+                return try? Data(contentsOf: folder.appendingPathComponent(name))
+            }.value
+            if let data { info.image = await thumbnail(data) }
         }
         cache[url] = info
         return info
+    }
+
+    /// Covers are often 3000 px; shrink them once, in the background, so the
+    /// panel doesn't resample a huge image on every redraw.
+    private static func thumbnail(_ data: Data) async -> NSImage? {
+        let cg: CGImage? = await Task.detached(priority: .utility) {
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                         kCGImageSourceThumbnailMaxPixelSize: 720,
+                                         kCGImageSourceCreateThumbnailWithTransform: true]
+            return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+        }.value
+        return cg.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
     }
 }

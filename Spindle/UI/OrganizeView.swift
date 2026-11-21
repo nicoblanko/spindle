@@ -55,6 +55,7 @@ struct OrganizeView: View {
     }
     @State private var dropTargeted = false
     @State private var keys = OrganizeKeys()
+    @AppStorage("organize.showArt") private var showArt = true
     @State private var showFilter = false
     @State private var showGroup = false
     @State private var naming: Naming?
@@ -89,8 +90,10 @@ struct OrganizeView: View {
                 grid
                     .frame(minHeight: 200)
             }
-            AlbumArtPanel(model: model)
-                .frame(width: 320)
+            if showArt {
+                AlbumArtPanel(model: model)
+                    .frame(width: 320)
+            }
         }
         .background(Theme.line)
         .onAppear {
@@ -143,6 +146,13 @@ struct OrganizeView: View {
             }
             SearchField(text: $library.search)
                 .frame(maxWidth: 180)
+            Button { showArt.toggle() } label: {
+                Image(systemName: "sidebar.right").font(.system(size: 12))
+                    .foregroundStyle(showArt ? Theme.ink : Theme.inkMuted)
+                    .frame(width: 24, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(showArt ? "Hide album art" : "Show album art")
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, Theme.space2)

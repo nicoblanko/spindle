@@ -14,6 +14,8 @@ import OSLog
 struct ContentView: View {
     @Bindable var model: AppModel
 
+    @State private var pageKeys = PageKeys()
+
     var body: some View {
         VStack(spacing: 0) {
             TopBar(model: model)
@@ -59,6 +61,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .frame(minWidth: 1180, minHeight: 820)
         .sheet(isPresented: $model.showingMIDI) { MIDIMappingView(midi: model.midi) }
+        .onAppear { pageKeys.install(model) }
         .task { await model.start() }
         .task { await model.refreshLibrary() }
         .task { await snapshotIfRequested() }
@@ -562,4 +565,27 @@ private struct PageBar: View {
         .frame(height: 36)
         .background(Theme.panelRaised)
     }
+}
+
+
+/// Tab moves to the next page and Shift-Tab to the previous one, unless
+/// you're typing in a field.
+final class PageKeys {
+    private var monitor: Any?
+
+    func install(_ model: AppModel) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
+            guard let model, event.keyCode == 48,
+                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                  !(event.window?.firstResponder is NSText) else { return event }
+            let pages = AppModel.Page.allCases
+            let i = pages.firstIndex(of: model.page) ?? 0
+            let step = event.modifierFlags.contains(.shift) ? -1 : 1
+            model.page = pages[(i + step + pages.count) % pages.count]
+            return nil
+        }
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }

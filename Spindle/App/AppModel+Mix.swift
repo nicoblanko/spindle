@@ -264,8 +264,15 @@ extension AppModel {
         prepPage.waveform = nil
         prepPage.error = nil
         prepPage.cursor = prep.prep(for: url)?.cue(.intro)?.time ?? 0
-        prepPage.loading = true
         loadPreview(url)
+        // The Mark page's analysis (a second full decode) only runs on Mark;
+        // pre-listening in Organize just plays the file.
+        if page == .prep { analyzeForPrep(url) } else { prepPage.loading = false; syncPreviewGrid() }
+    }
+
+    /// Works out the Mark page's waveform and suggested grid for `url`.
+    func analyzeForPrep(_ url: URL) {
+        prepPage.loading = true
         let bpm = analysis.analysis(for: url)?.bpm
         Task {
             try? await Task.sleep(for: .milliseconds(200))

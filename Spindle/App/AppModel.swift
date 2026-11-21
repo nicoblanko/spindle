@@ -191,7 +191,10 @@ final class AppModel {
     var organizeSelection = Set<URL>()
     /// Remembered between launches.
     var page: Page = Page(rawValue: UserDefaults.standard.string(forKey: "page") ?? "") ?? .mix {
-        didSet { UserDefaults.standard.set(page.rawValue, forKey: "page") }
+        didSet {
+            UserDefaults.standard.set(page.rawValue, forKey: "page")
+            if page == .prep, let url = prepPage.selected, prepPage.waveform == nil, !prepPage.loading { analyzeForPrep(url) }
+        }
     }
 
     enum Page: String, CaseIterable, Identifiable {
