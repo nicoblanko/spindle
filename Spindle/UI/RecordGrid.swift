@@ -113,6 +113,11 @@ struct RecordGrid: View {
         return groups.filter { !view.collapsed.contains($0.id) }.flatMap(\.records)
     }
 
+    /// The grid's visible width, so rows get a fixed size (the lazy list
+    /// otherwise measures every row to find the widest).
+    @State private var gridWidth: CGFloat = 0
+    private var rowWidth: CGFloat { max(totalWidth, gridWidth) }
+
     var body: some View {
         let _ = optionCache.map.removeAll(keepingCapacity: true)
         let _ = columnCache.refresh(context.orderedFields(view).filter { !view.hidden.contains($0) && ($0 != .listen || listen != nil) })
@@ -133,6 +138,7 @@ struct RecordGrid: View {
                                 .font(Theme.caption).foregroundStyle(Theme.inkFaint)
                                 .padding(Theme.space2)
                         }
+                        .background(alignment: .topLeading) { columnLines }
                         // Rebuild rows when the columns change, so no row keeps an old layout.
                         .id(columns.map { "\($0)" }.joined(separator: "|"))
                     }
@@ -143,6 +149,8 @@ struct RecordGrid: View {
                 }
                 .frame(width: max(totalWidth, geo.size.width), height: geo.size.height, alignment: .topLeading)
             }
+            .onAppear { gridWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, w in gridWidth = w }
         }
         .background(Theme.panel)
         .sheet(item: Binding(get: { managing.map(ManagingRef.init) }, set: { managing = $0?.ref })) { m in
@@ -330,23 +338,40 @@ struct RecordGrid: View {
         }
     }
 
+    private static func mayOverflow(_ f: FieldRef) -> Bool {
+        switch f {
+        case .tags, .tempoGroup, .mood, .custom: true
+        default: false
+        }
+    }
+
+    /// The vertical lines between columns, once for the whole list.
+    private var columnLines: some View {
+        let edges = columns.reduce(into: [CGFloat]()) { acc, f in acc.append((acc.last ?? (leading != nil ? leadingWidth : 0)) + width(f)) }
+        return Canvas { context, size in
+            for x in edges {
+                context.fill(Path(CGRect(x: x - 1, y: 0, width: 1, height: size.height)), with: .color(Theme.line.opacity(0.5)))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
     private func row(_ r: Record) -> some View {
         let isSelected = selected.contains(r.id)
         return HStack(spacing: 0) {
             if let leading { leading(r).frame(width: leadingWidth) }
             ForEach(columns, id: \.self) { f in
-                cell(r, f)
+                // Few layers per cell: text truncates by itself, so only pill
+                // cells clip; the column lines are drawn once for the list.
+                let c = cell(r, f)
                     .padding(.horizontal, Theme.space2)
                     .frame(width: width(f), height: 30, alignment: .leading)
-                    .clipped()
-                    .overlay(alignment: .trailing) { Rectangle().fill(Theme.line.opacity(0.5)).frame(width: 1) }
+                if Self.mayOverflow(f) { c.clipped() } else { c }
             }
-            Spacer(minLength: 0)
         }
-        .frame(height: 30)
+        .frame(width: rowWidth, height: 30, alignment: .leading)
         .background {
             ZStack {
-                Theme.panel
                 if let c = context.meta.color(r.path) {
                     // A faint flat tint with the colour as a bar on the left edge.
                     c.color.opacity(isSelected ? 0.2 : 0.1)

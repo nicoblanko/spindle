@@ -305,7 +305,9 @@ struct OrganizeView: View {
 
     @ViewBuilder
     private func contextMenu(_ urls: Set<URL>) -> some View {
-        let ordered = rows.filter { urls.contains($0.id) }.map(\.id)
+        // In list order, from the order the grid already worked out (this menu
+        // is built for every row on every redraw).
+        let ordered = urls.count == 1 ? Array(urls) : keys.order.filter(urls.contains)
         if let url = ordered.first {
             Button("Load into deck A") { Task { await model.load(url: url, into: model.decks[0]) } }
             Button("Load into deck B") { Task { await model.load(url: url, into: model.decks[1]) } }

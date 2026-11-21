@@ -92,6 +92,26 @@ extension ContentView {
             spindleLog.notice("Grid check written")
             return
         }
+        if ProcessInfo.processInfo.environment["SPINDLE_LAGTEST"] != nil {
+            // Flips Organize between lists so the redraw can be profiled.
+            model.page = .organize
+            try? await Task.sleep(for: .seconds(4))
+            let lib = model.library
+            let targets: [() -> Void] = lib.crates.prefix(4).map { c in { lib.crate = c } }
+                + lib.playlists.nodes.prefix(6).map { n in { lib.playlist = n.id } }
+                + [{ lib.selectAll() }]
+            for round in 0..<6 {
+                for (i, go) in targets.enumerated() {
+                    let t0 = Date()
+                    go()
+                    await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
+                    try? await Task.sleep(for: .milliseconds(30))
+                    if round == 0 { spindleLog.notice(String(format: "Lag test %d: %.0f ms", i, Date().timeIntervalSince(t0) * 1000 - 30)) }
+                }
+            }
+            spindleLog.notice("Lag test done")
+            return
+        }
         if ProcessInfo.processInfo.environment["SPINDLE_SCRUBTEST"] != nil {
             spindleLog.notice("\(DeckEngine.scrubTest())")
             spindleLog.notice("\(DeckEngine.loopTest())")
