@@ -376,18 +376,18 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             }
             let onRecord = decoder.positionSeconds(startIndex: startIndex)
             // The lead-in (needle on the edge, before the side's first
-            // groove): the track waits at its start and begins as the needle
-            // reaches the first groove, as in Traktor.
+            // groove) is the time before the track, as in Traktor: the record
+            // maps straight onto the track, the playhead runs below 0 in
+            // silence and the music starts as the needle reaches the first
+            // groove. No hold: holding the track at 0 needed a reading, and
+            // spinning or scratching there lost it, so the track kept
+            // switching between held and moving.
             let confirmed = decoder.hasPosition && decoder.validBits >= confirmBits
-            leadIn = absoluteMode && startKnown && decoder.hasPosition && !anchorPending
-                && onRecord < 0 && onRecord > -30 && (confirmed || leadIn)
-            if leadIn {
-                trackOffset = 0
-                if playhead != 0 { startFade(from: playhead); playhead = 0 }
-                target = 0
-            }
+            leadIn = absoluteMode && startKnown && confirmed && !anchorPending
+                && onRecord < 0 && onRecord > -30
+            if leadIn { trackOffset = 0 }
             position = onRecord - trackOffset
-            absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting && !leadIn
+            absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
             if absolute {
                 let error = position - playhead
                 let length = track.load(ordering: .acquiring)
@@ -410,7 +410,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                     startFade(from: playhead)
                     jumpCount &+= 1
                     lastJump = position - playhead
-                    if position > length - 1 || position < -2 {
+                    if position > length - 1 || (position < -2 && !leadIn) {
                         // The needle is past the end of the track (or well
                         // before its start): the track starts at this groove,
                         // so wherever the needle goes down, it plays.
