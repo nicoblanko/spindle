@@ -22,6 +22,10 @@ final class DeckModel: Identifiable {
     /// Absolute: the needle's place on the record is the place in the track
     /// (needle drops jump). Relative: only the record's speed and direction
     /// count, so needle drops don't move the track. Remembered per deck.
+    /// The timecode vinyl on this deck's turntable. Remembered per deck.
+    var vinyl: TimecodeDefinition = .traktorMK2 {
+        didSet { UserDefaults.standard.set(vinyl.id, forKey: "deck.vinyl.\(label)") }
+    }
     var absoluteMode = true {
         didSet { UserDefaults.standard.set(absoluteMode, forKey: "deck.absolute.\(label)") }
     }
@@ -56,6 +60,7 @@ final class DeckModel: Identifiable {
     init(id: Int) {
         self.id = id
         absoluteMode = UserDefaults.standard.object(forKey: "deck.absolute.\(id == 0 ? "A" : "B")") as? Bool ?? true
+        vinyl = TimecodeDefinition.named(UserDefaults.standard.string(forKey: "deck.vinyl.\(id == 0 ? "A" : "B")")) ?? .traktorMK2
     }
 
     // Remembered per deck and vinyl format.
@@ -114,7 +119,15 @@ nonisolated let spindleLog = DiagnosticLog()
 final class AppModel {
     var devices: [AudioDevice] = []
     var selectedDeviceID: AudioDeviceID?
-    var definition: TimecodeDefinition = .traktorMK2
+    /// Deck A's vinyl (the simulator and a few labels use one name).
+    var definition: TimecodeDefinition { decks.first?.vinyl ?? .traktorMK2 }
+
+    /// Changes one deck's vinyl and restarts the audio to read it.
+    func setVinyl(_ def: TimecodeDefinition, deck: DeckModel) {
+        guard deck.vinyl != def else { return }
+        deck.vinyl = def
+        Task { await start() }
+    }
     /// How the decks are played: turntables, the laptop alone, or simulated
     /// turntables (for testing). Remembered between launches.
     var controlMode: ControlMode = ControlMode(rawValue: UserDefaults.standard.string(forKey: "control") ?? "") ?? .laptop {
@@ -298,7 +311,7 @@ final class AppModel {
                 ?? devices.first(where: \.isXone)?.id
                 ?? AudioDevices.defaultOutput()
         }
-        spindleLog.notice("Start: device \(selectedDevice?.name ?? "none"), control \(controlMode.rawValue), vinyl \(definition.id)")
+        spindleLog.notice("Start: device \(selectedDevice?.name ?? "none"), control \(controlMode.rawValue), vinyl A \(decks[0].vinyl.id), B \(decks[1].vinyl.id)")
         guard let device = selectedDevice.flatMap({ AudioDevices.device($0.id) }) else {
             error = "No audio device selected."
             return
@@ -322,15 +335,15 @@ final class AppModel {
             routing = savedRouting(for: device) ?? EngineRouting.defaults(for: device)
             routingDeviceID = device.id
         }
-        let definition = definition
+        let definitions = decks.map(\.vinyl)
         let simulate = simulate
         let laptop = controlMode == .laptop
         let routing = routing
         // Building the 32 MB position table takes a moment; keep it off the main thread.
         spindleLog.notice("Building engine")
         let core = await Task.detached {
-            _ = TimecodeLookup.shared(for: definition)
-            return AudioEngineCore(device: device, definition: definition, simulate: simulate, laptop: laptop, routing: routing)
+            for d in definitions { _ = TimecodeLookup.shared(for: d) }
+            return AudioEngineCore(device: device, definitions: definitions, simulate: simulate, laptop: laptop, routing: routing)
         }.value
         do {
             try core.start()
@@ -348,9 +361,9 @@ final class AppModel {
         core.recordInput = recordInputDefault(for: core)
         for deck in decks {
             core.decks[deck.id].absoluteMode = deck.absoluteMode
-            if let config = deck.preferredConfig(for: definition) { core.decks[deck.id].prefer(config: config) }
-            core.decks[deck.id].startIndex = deck.startIndex(for: definition) ?? 0
-            core.decks[deck.id].startKnown = deck.startIndex(for: definition) != nil
+            if let config = deck.preferredConfig(for: deck.vinyl) { core.decks[deck.id].prefer(config: config) }
+            core.decks[deck.id].startIndex = deck.startIndex(for: deck.vinyl) ?? 0
+            core.decks[deck.id].startKnown = deck.startIndex(for: deck.vinyl) != nil
             core.decks[deck.id].toneFrequency = deck.id == 0 ? 440 : 660
             core.decks[deck.id].testTone = deck.testTone
             for kind in FXKind.allCases { core.decks[deck.id].setFX(kind, deck.fx[kind]) }
@@ -429,8 +442,9 @@ final class AppModel {
             while let self, let core = self.engine, self.running {
                 for deck in self.decks {
                     let t = core.decks[deck.id].telemetry.pointee
-                    if t.hasPosition, deck.preferredConfig(for: core.definition) != Int(t.activeConfig) {
-                        deck.setPreferredConfig(Int(t.activeConfig), for: core.definition)
+                    let def = core.decks[deck.id].definition
+                    if t.hasPosition, deck.preferredConfig(for: def) != Int(t.activeConfig) {
+                        deck.setPreferredConfig(Int(t.activeConfig), for: def)
                     }
                     // Lock lost while playing (a lift, a skip): log it, to tune
                     // the lift detection on real records.
@@ -440,8 +454,8 @@ final class AppModel {
                                                  deck.label, t.lastLossRatio * 100, t.lastLossCoasting ? "carried on" : "followed the signal"))
                     }
                     // The record's start, once the deck has learned it.
-                    if t.recordStart >= 0, deck.startIndex(for: core.definition) != t.recordStart {
-                        deck.setStartIndex(t.recordStart, for: core.definition)
+                    if t.recordStart >= 0, deck.startIndex(for: def) != t.recordStart {
+                        deck.setStartIndex(t.recordStart, for: def)
                         spindleLog.notice("Deck \(deck.label): record start learned")
                     }
                 }

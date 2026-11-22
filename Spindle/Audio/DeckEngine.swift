@@ -224,7 +224,11 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// again: a false lock on landing drops out well before that.
     private let confirmBits: Int
 
+    /// The vinyl this deck reads.
+    let definition: TimecodeDefinition
+
     init(definition: TimecodeDefinition, sampleRate: Double) {
+        self.definition = definition
         self.sampleRate = sampleRate
         decoders = DecoderConfig.all.map { TimecodeDecoder(config: $0, definition: definition, sampleRate: sampleRate) }
         canSearch = definition.decodesPosition
@@ -336,15 +340,19 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                     .map { $0.assumingMemoryBound(to: TrackSamples.self).pointee }
                     .map { Double($0.frames) / $0.sampleRate } ?? .infinity
                 _ = length
-                if abs(error) > 0.15 {
-                    // A jump only on a confirmed reading: a hard reversal
-                    // can give a moment's wrong position.
+                // As in Mixxx (vinylcontrolxwax.cpp): the track runs at the
+                // record's speed and only jumps on a real needle drop, not on
+                // every small difference a reading glitch makes. A jump needs
+                // a confirmed reading more than half a second away; smaller
+                // differences are taken up gently, at most 3% speed, which
+                // you don't hear.
+                if abs(error) > 0.5 {
                     if decoder.validBits >= confirmBits {
                         startFade(from: playhead)
                         playhead = position              // needle drop
                     }
                 } else {
-                    target += error * 2                  // pull gently into place
+                    target += min(max(error * 2, -0.03), 0.03)
                 }
             }
 
@@ -873,7 +881,23 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             return String(format: "fast spins: largest gap %.2f s, at the end %+.3f s", worst, end)
         }
 
-        return "Needle test · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
+        /// Every vinyl format: lock onto a simulated record at 60 s and read
+        /// where it is (should be ~61.5 s after 1.5 s of play).
+        func formats() -> String {
+            TimecodeDefinition.all.map { d in
+                let deck = DeckEngine(definition: d, sampleRate: rate)
+                let sim = TimecodeSimulator(definition: d, startSeconds: 60)
+                sim.targetPitch = 1
+                var t = 0.0
+                play(deck, sim, &t, until: 1.5)
+                let decoder = deck.decoders[deck.active]
+                let at = decoder.hasPosition ? decoder.positionSeconds() : -1
+                let truth = sim.phase / d.resolution
+                return String(format: "%@ %@ (read %.2f s, record %.2f s)", d.id, decoder.hasPosition && abs(at - truth) < 0.05 ? "ok" : "FAIL", at, truth)
+            }.joined(separator: ", ")
+        }
+
+        return "Needle test · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while

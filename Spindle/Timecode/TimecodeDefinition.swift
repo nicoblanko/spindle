@@ -68,7 +68,23 @@ nonisolated struct TimecodeDefinition: Sendable, Hashable, Identifiable {
         id: "traktor_b", name: "Traktor Scratch · side B",
         resolution: 2000, bits: 23, seed: 0x32066c, taps: 0x041040, length: 2_110_000)
 
-    static let all: [TimecodeDefinition] = [.traktorMK2, .traktorA, .traktorB]
+    // Serato Control Vinyl (2nd edition) and CD. The code's parameters
+    // (seed, taps, length) are as listed in xwax's timecoder.c.
+    static let seratoA = TimecodeDefinition(
+        id: "serato_2a", name: "Serato CV02 · side A",
+        resolution: 1000, bits: 20, seed: 0x59017, taps: 0x361e4, length: 712_000)
+
+    static let seratoB = TimecodeDefinition(
+        id: "serato_2b", name: "Serato CV02 · side B",
+        resolution: 1000, bits: 20, seed: 0x8f3c6, taps: 0x4f0d8, length: 922_000)
+
+    static let seratoCD = TimecodeDefinition(
+        id: "serato_cd", name: "Serato CD",
+        resolution: 1000, bits: 20, seed: 0xd8b40, taps: 0x34d54, length: 950_000)
+
+    static let all: [TimecodeDefinition] = [.traktorMK2, .traktorA, .traktorB, .seratoA, .seratoB, .seratoCD]
+
+    static func named(_ id: String?) -> TimecodeDefinition? { all.first { $0.id == id } }
 
     var mask: UInt32 { (UInt32(1) << UInt32(bits)) - 1 }
 

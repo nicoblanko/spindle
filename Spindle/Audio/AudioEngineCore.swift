@@ -81,7 +81,12 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
     /// Laptop mode: no timecode, the decks play from their own transport.
     let laptop: Bool
 
-    init(device: AudioDevice, definition: TimecodeDefinition, simulate: Bool, laptop: Bool = false, routing: EngineRouting) {
+    /// Each deck's vinyl (a Traktor record on A and a Serato one on B is fine).
+    let definitions: [TimecodeDefinition]
+
+    init(device: AudioDevice, definitions: [TimecodeDefinition], simulate: Bool, laptop: Bool = false, routing: EngineRouting) {
+        let definition = definitions[0]
+        self.definitions = definitions
         self.laptop = laptop
         self.device = device
         self.sampleRate = device.sampleRate > 0 ? device.sampleRate : 48000
@@ -91,9 +96,9 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
         inputChannels = self.simulate || laptop ? 0 : device.inputChannels
         outputChannels = device.outputChannels
 
-        decks = [DeckEngine(definition: definition, sampleRate: sampleRate),
-                 DeckEngine(definition: definition, sampleRate: sampleRate)]
-        simulators = [TimecodeSimulator(definition: definition), TimecodeSimulator(definition: definition)]
+        decks = [DeckEngine(definition: definitions[0], sampleRate: sampleRate),
+                 DeckEngine(definition: definitions[1], sampleRate: sampleRate)]
+        simulators = [TimecodeSimulator(definition: definitions[0]), TimecodeSimulator(definition: definitions[1])]
         for deck in decks { deck.internalMode = laptop }
         preview = DeckEngine(definition: definition, sampleRate: sampleRate)
         preview.internalMode = true

@@ -442,13 +442,19 @@ private struct TopBar: View {
 
             if model.controlMode != .laptop {
                 Menu {
-                    ForEach(TimecodeDefinition.all) { def in
-                        Button { model.definition = def } label: {
-                            if def == model.definition { Label(def.name, systemImage: "checkmark") } else { Text(def.name) }
+                    // Per deck: a Traktor record on one and Serato on the other works.
+                    ForEach(model.decks) { deck in
+                        Section("Deck \(deck.label)") {
+                            ForEach(TimecodeDefinition.all) { def in
+                                Button { model.setVinyl(def, deck: deck) } label: {
+                                    if def == deck.vinyl { Label(def.name, systemImage: "checkmark") } else { Text(def.name) }
+                                }
+                            }
                         }
                     }
                 } label: {
-                    TopMenuLabel(icon: "barcode", text: model.definition.name)
+                    TopMenuLabel(icon: "barcode", text: model.decks[0].vinyl == model.decks[1].vinyl
+                                 ? model.decks[0].vinyl.name : "A: \(model.decks[0].vinyl.name) · B: \(model.decks[1].vinyl.name)")
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("Timecode vinyl")
