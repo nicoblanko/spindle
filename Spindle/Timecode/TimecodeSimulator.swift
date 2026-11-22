@@ -20,6 +20,9 @@ nonisolated final class TimecodeSimulator {
     let definition: TimecodeDefinition
     /// Target speed set from the UI: 1 = 33⅓ rpm, 0 = stopped, negative = backwards.
     var targetPitch: Double = 0
+    /// How quickly the platter reaches `targetPitch` per sample: 0.0008 is
+    /// a motor (~25 ms); higher is a hand yanking it.
+    var inertia = 0.0008
     private(set) var pitch: Double = 0
     /// Needle position in carrier cycles.
     private(set) var phase: Double
@@ -97,7 +100,7 @@ nonisolated final class TimecodeSimulator {
         let coupling = Float(exp(-1 / (0.0017 * sampleRate)))
 
         for i in 0..<frames {
-            pitch += (targetPitch - pitch) * 0.0008
+            pitch += (targetPitch - pitch) * inertia
             phase = min(max(phase + pitch * step, 0), maxCycle)
             let index = index(ofCycle: phase)
             if index != codeIndex { seek(toIndex: index) }

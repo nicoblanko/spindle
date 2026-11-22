@@ -337,8 +337,12 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                     .map { Double($0.frames) / $0.sampleRate } ?? .infinity
                 _ = length
                 if abs(error) > 0.15 {
-                    startFade(from: playhead)
-                    playhead = position                  // needle drop
+                    // A jump only on a confirmed reading: a hard reversal
+                    // can give a moment's wrong position.
+                    if decoder.validBits >= confirmBits {
+                        startFade(from: playhead)
+                        playhead = position              // needle drop
+                    }
                 } else {
                     target += error * 2                  // pull gently into place
                 }
@@ -601,6 +605,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private var goodPitch = 0.0
     private var sinceGood = Int.max / 2
     private var lastPitch = 0.0
+    private var lastDelta = 0.0
     private var garbage = 0
     /// How long a scraping, jumping reading is bridged with the last good
     /// speed before the deck stops.
@@ -616,7 +621,13 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private func followSpeed(_ decoder: TimecodeDecoder, frames: Int) -> Double {
         coasting = false
         let pitch = decoder.pitch
-        let jumpy = abs(pitch - lastPitch) > 0.15
+        // Scraping reads as a zig-zag: big changes that flip direction from
+        // buffer to buffer. A hand spinning the record changes speed fast
+        // too, but in one direction at a time.
+        let delta = pitch - lastPitch
+        let big = 0.15 + 0.05 * abs(pitch)
+        let jumpy = abs(delta) > big && abs(lastDelta) > big && delta * lastDelta < 0
+        lastDelta = delta
         lastPitch = pitch
         if decoder.hasPosition && decoder.validBits >= confirmBits {
             goodPitch = pitch
@@ -828,7 +839,41 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             return String(format: "hand stop: %@, moved %.3f s in the next second", coasted ? "CARRIED ON (wrong)" : "stopped", moved)
         }
 
-        return "Needle test · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
+        /// Fast spins by hand: 4× forwards, 4× backwards, then play. The
+        /// track should stay with the record throughout (largest gap, and
+        /// the gap at the end).
+        func spin() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let track = makeTrack()
+            _ = deck.exchangeTrack(track)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 120)
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 3)
+            sim.inertia = 0.02                          // a hand: ~1 ms to change speed
+            let offset = needle(sim) - deck.telemetry.pointee.playhead
+            var worst = 0.0
+            func gap() -> Double { deck.telemetry.pointee.playhead - (needle(sim) - offset) }
+            var trace: [String] = []
+            var nextTrace = t
+            for (speed, until) in [(4.0, 3.5), (-4.0, 4.0), (6.0, 4.3), (-6.0, 4.6), (2.0, 4.8), (-3.0, 5.0), (1.0, 6.5)] {
+                sim.targetPitch = speed
+                play(deck, sim, &t, until: until) { now in
+                    worst = max(worst, abs(gap()))
+                    if now >= nextTrace && now < 5.2 {
+                        let tel = deck.telemetry.pointee
+                        trace.append(String(format: "%.1f/%.1f%@ g%.2f", sim.pitch, tel.pitch, tel.hasPosition ? "" : "?", gap()))
+                        nextTrace += 0.05
+                    }
+                }
+            }
+            spindleLog.notice("Spin trace (record/read): \(trace.joined(separator: " "))")
+            let end = gap()
+            track.pointee.free(); track.deallocate()
+            return String(format: "fast spins: largest gap %.2f s, at the end %+.3f s", worst, end)
+        }
+
+        return "Needle test · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while
