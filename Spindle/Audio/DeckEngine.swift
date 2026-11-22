@@ -349,7 +349,16 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 if abs(error) > 0.5 {
                     if decoder.validBits >= confirmBits {
                         startFade(from: playhead)
-                        playhead = position              // needle drop
+                        if position > length - 1 || position < -2 {
+                            // The needle is past the end of the track (or well
+                            // before its start): the track starts at this groove,
+                            // so wherever the needle goes down, it plays.
+                            trackOffset += position
+                            playhead = 0
+                            position = 0
+                        } else {
+                            playhead = position          // needle drop within the track
+                        }
                     }
                 } else {
                     target += min(max(error * 2, -0.03), 0.03)
@@ -897,7 +906,34 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             }.joined(separator: ", ")
         }
 
-        return "Needle test · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
+        /// A 5-minute track loaded while the needle is 8 minutes into the
+        /// record: it should start at the needle (playhead ~0, 0.5, 1…).
+        func lateLoad() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let frames = Int(rate * 300)
+            let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            l.initialize(repeating: 0, count: frames); r.initialize(repeating: 0, count: frames)
+            let short = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+            short.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+            let first = makeTrack()
+            _ = deck.exchangeTrack(first)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 10)
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 2)                  // learns the start at ~10 s
+            sim.seek(seconds: 490)                         // needle 8 minutes in
+            play(deck, sim, &t, until: 3)
+            let old = deck.exchangeTrack(short)
+            var marks: [String] = []
+            var next = t + 0.5
+            play(deck, sim, &t, until: t + 2.01) { now in
+                if now >= next { marks.append(String(format: "%.2f", deck.telemetry.pointee.playhead)); next += 0.5 }
+            }
+            old?.pointee.free(); old?.deallocate(); short.pointee.free(); short.deallocate()
+            return "5-min track loaded 8 min into the record: " + marks.joined(separator: " ")
+        }
+
+        return "Needle test · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while
