@@ -296,6 +296,7 @@ struct RecordGrid: View {
             Divider()
         }
         if f == .tags { Button("Edit options…") { managing = .tags }; Divider() }
+        if [.mood, .intro, .outro, .tempoGroup].contains(f) { Button("Edit colours…") { managing = f }; Divider() }
         Button("Sort first → last") { view.sortField = f; view.sortAscending = true }
         Button("Sort last → first") { view.sortField = f; view.sortAscending = false }
         if f != .name { Button("Group by this field") { view.groupBy = f; view.collapsed = [] } }
@@ -538,7 +539,23 @@ struct RecordGrid: View {
 
     @ViewBuilder
     private func manageSheet(_ ref: FieldRef) -> some View {
-        if ref == .tags {
+        if ref == .mood || ref == .intro || ref == .outro {
+            // Built-in labels: colour only.
+            let key = ref == .mood ? "mood" : ref == .intro ? "intro" : "outro"
+            let colors = OptionColors.shared
+            ManageOptionsView(
+                title: "\(context.name(ref)) colours",
+                items: context.options(ref).enumerated().map { i, o in
+                    .init(id: o.id, name: o.name, colorIndex: colors.index(key, o.id) ?? (ref == .mood ? (o.id == "A" ? 8 : 4) : 9))
+                },
+                onRecolor: { id, c in colors.set(key, id, c) })
+        } else if ref == .tempoGroup {
+            let tags = model.library.tags
+            ManageOptionsView(
+                title: "Tempo group colours",
+                items: tags.tempoGroups.map { .init(id: $0.id.uuidString, name: $0.name, colorIndex: $0.colorIndex) },
+                onRecolor: { id, c in if var t = tags.tag(UUID(uuidString: id)) { t.colorIndex = c; tags.update(t) } })
+        } else if ref == .tags {
             let tags = model.library.tags
             ManageOptionsView(
                 title: "Tags",

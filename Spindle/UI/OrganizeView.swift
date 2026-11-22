@@ -871,14 +871,26 @@ struct CrateList: View {
 
     /// Clicking a tag filters the grid to tracks that have it (Airtable's
     /// "Tags has any of …"), over all tracks.
-    private func showTag(_ tag: TagDef) {
-        library.selectAll()
-        model.organizeView.conditions = [FilterCondition(field: .tags, op: .hasAny, options: [tag.id.uuidString])]
-    }
+    /// Clicking a tag lists every track that has it (like a set), on
+    /// every page.
+    private func showTag(_ tag: TagDef) { library.tag = tag.id }
 
-    private func isShowing(_ tag: TagDef) -> Bool {
-        let c = model.organizeView.conditions
-        return c.count == 1 && c[0].field == .tags && c[0].op == .hasAny && c[0].options == [tag.id.uuidString]
+    private func isShowing(_ tag: TagDef) -> Bool { library.tag == tag.id }
+
+    /// Colour ▸ for a tag or tempo group (the palette, by name).
+    private func colourMenu(_ tag: TagDef) -> some View {
+        Menu("Colour") {
+            ForEach(TagStore.paletteNames.indices, id: \.self) { i in
+                Button {
+                    var t = tag
+                    t.colorIndex = i
+                    tagStore.update(t)
+                } label: {
+                    Label(TagStore.paletteNames[i], systemImage: i == tag.colorIndex % TagStore.palette.count ? "checkmark" : "circle.fill")
+                }
+                if i == 9 { Divider() }
+            }
+        }
     }
 
     private func makeTempoGroups() {
@@ -917,9 +929,8 @@ struct CrateList: View {
         .background(selected ? Theme.accentSoft : (dropTarget == tag.id ? Theme.panelRaised : Color.clear))
         .overlay { if dropTarget == tag.id { Rectangle().strokeBorder(Theme.accent, lineWidth: 1) } }
         .contentShape(Rectangle())
-        .onTapGesture { if selected { model.organizeView.conditions = [] } else { showTag(tag) } }
+        .onTapGesture { showTag(tag) }
         .simultaneousGesture(TapGesture(count: 2).onEnded {
-            if !isShowing(tag) { showTag(tag) }        // the second click toggled it off
             draft = tag.name; renaming = tag.id
         })
         .help("Show tracks with this tag. Drag tracks here to tag them.")
@@ -931,10 +942,11 @@ struct CrateList: View {
         }
         .contextMenu {
             Button("Rename") { draft = tag.name; renaming = tag.id }
+            colourMenu(tag)
             Button("Edit tags…") { editingTags = true }
             Divider()
             Button("Delete tag", role: .destructive) {
-                if isShowing(tag) { model.organizeView.conditions = [] }
+                if isShowing(tag) { library.selectAll() }
                 tagStore.delete(tag.id)
             }
         }
@@ -994,6 +1006,7 @@ struct CrateList: View {
         .help(tag.rule.map { "Tempo group: \($0.summary). Tracks join by themselves." } ?? "")
         .contextMenu {
             Button("Edit range…") { editingGroup = tag }
+            colourMenu(tag)
             Divider()
             Button("Delete group", role: .destructive) {
                 if library.tag == tag.id { library.selectAll() }

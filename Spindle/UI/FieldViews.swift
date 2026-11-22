@@ -189,11 +189,12 @@ struct ManageOptionsView: View {
 
     let title: String
     let items: [Item]
-    let onRename: (String, String) -> Void
+    /// Built-in labels (Mood, Intro…) only change colour: leave these nil.
+    var onRename: ((String, String) -> Void)? = nil
     let onRecolor: (String, Int) -> Void
-    let onDelete: (String) -> Void
-    let onMove: (IndexSet, Int) -> Void
-    let onAdd: (String) -> Void
+    var onDelete: ((String) -> Void)? = nil
+    var onMove: ((IndexSet, Int) -> Void)? = nil
+    var onAdd: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var newName = ""
 
@@ -214,14 +215,17 @@ struct ManageOptionsView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .frame(minHeight: 220)
-            HStack {
-                TextField("New option", text: $newName).textFieldStyle(.roundedBorder).onSubmit(add)
-                Button("Add option", action: add).buttonStyle(FlatButtonStyle())
+            if onAdd != nil {
+                HStack {
+                    TextField("New option", text: $newName).textFieldStyle(.roundedBorder).onSubmit(add)
+                    Button("Add option", action: add).buttonStyle(FlatButtonStyle())
+                }
+                .padding(Theme.space3)
             }
-            .padding(Theme.space3)
-            Text("Drag to reorder. Pills show in this order everywhere.")
+            Text(onMove != nil ? "Click a dot to pick its colour. Drag to reorder; pills show in this order everywhere."
+                               : "Click a dot to pick its colour.")
                 .font(Theme.caption).foregroundStyle(Theme.inkFaint)
-                .padding([.horizontal, .bottom], Theme.space3)
+                .padding(Theme.space3)
         }
         .frame(width: 400, height: 460)
         .background(Theme.panel)
@@ -231,48 +235,70 @@ struct ManageOptionsView: View {
     private func add() {
         let n = newName.trimmingCharacters(in: .whitespaces)
         guard !n.isEmpty else { return }
-        onAdd(n)
+        onAdd?(n)
         newName = ""
     }
 
     private struct OptionRow: View {
         let item: Item
-        let onRename: (String, String) -> Void
+        let onRename: ((String, String) -> Void)?
         let onRecolor: (String, Int) -> Void
-        let onDelete: (String) -> Void
+        let onDelete: ((String) -> Void)?
         @State private var name = ""
         @State private var picking = false
 
         var body: some View {
             HStack(spacing: Theme.space2) {
-                Image(systemName: "line.3.horizontal").foregroundStyle(Theme.inkFaint)
+                if onRename != nil { Image(systemName: "line.3.horizontal").foregroundStyle(Theme.inkFaint) }
                 Button { picking = true } label: {
                     Circle().fill(TagStore.palette[item.colorIndex % TagStore.palette.count]).frame(width: 14, height: 14)
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $picking) {
-                    HStack(spacing: 6) {
-                        ForEach(0..<TagStore.palette.count, id: \.self) { i in
-                            Circle().fill(TagStore.palette[i]).frame(width: 18, height: 18)
-                                .overlay(Circle().stroke(Theme.ink, lineWidth: i == item.colorIndex % TagStore.palette.count ? 2 : 0))
-                                .onTapGesture { onRecolor(item.id, i); picking = false }
-                                .help(TagStore.paletteNames[i])
-                        }
-                    }
-                    .padding(Theme.space2)
+                    PalettePicker(selected: item.colorIndex) { onRecolor(item.id, $0); picking = false }
                 }
-                TextField("Name", text: $name)
-                    .textFieldStyle(.plain)
-                    .onSubmit { onRename(item.id, name) }
-                    .onAppear { name = item.name }
-                    .onChange(of: item.name) { name = item.name }
+                if let onRename {
+                    TextField("Name", text: $name)
+                        .textFieldStyle(.plain)
+                        .onSubmit { onRename(item.id, name) }
+                        .onAppear { name = item.name }
+                        .onChange(of: item.name) { name = item.name }
+                } else {
+                    Text(item.name).font(Theme.body).foregroundStyle(Theme.ink)
+                    Spacer()
+                }
                 Pill(name: name.isEmpty ? item.name : name, color: TagStore.palette[item.colorIndex % TagStore.palette.count])
-                Button { onDelete(item.id) } label: { Image(systemName: "trash").font(.system(size: 11)) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.inkMuted)
-                    .help("Delete this option (removes it from every track)")
+                if let onDelete {
+                    Button { onDelete(item.id) } label: { Image(systemName: "trash").font(.system(size: 11)) }
+                        .buttonStyle(.plain).foregroundStyle(Theme.inkMuted)
+                        .help("Delete this option (removes it from every track)")
+                }
             }
             .padding(.vertical, 2)
         }
+    }
+}
+
+/// The label colours: the pale row on top, the strong row below.
+struct PalettePicker: View {
+    let selected: Int
+    let pick: (Int) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach([0, 10], id: \.self) { start in
+                HStack(spacing: 6) {
+                    ForEach(start..<min(start + 10, TagStore.palette.count), id: \.self) { i in
+                        Circle().fill(TagStore.palette[i]).frame(width: 18, height: 18)
+                            .overlay(Circle().stroke(Theme.ink, lineWidth: i == selected % TagStore.palette.count ? 2 : 0))
+                            .contentShape(Circle())
+                            .onTapGesture { pick(i) }
+                            .help(TagStore.paletteNames[i])
+                    }
+                }
+            }
+        }
+        .padding(Theme.space2)
     }
 }
 

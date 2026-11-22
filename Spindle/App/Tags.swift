@@ -80,8 +80,14 @@ final class TagStore {
         Color(hex: 0xcfdfff), Color(hex: 0xd0f0fd), Color(hex: 0xc2f5e9), Color(hex: 0xd1f7c4),
         Color(hex: 0xffeab6), Color(hex: 0xfee2d5), Color(hex: 0xffdce5), Color(hex: 0xffdaf6),
         Color(hex: 0xede2fe), Color(hex: 0xe5e9f0),
+        // Stronger versions, which stand out on the dark screen.
+        Color(hex: 0x8fb4ff), Color(hex: 0x7fd3f0), Color(hex: 0x6fdcc0), Color(hex: 0x9fe07f),
+        Color(hex: 0xffd264), Color(hex: 0xffab78), Color(hex: 0xff8f8f), Color(hex: 0xff9fcf),
+        Color(hex: 0xc4a2ff), Color(hex: 0xb4bccb),
     ] }
-    static let paletteNames = ["Blue", "Cyan", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Grey"]
+    static let paletteNames = ["Blue", "Cyan", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Grey",
+                               "Strong blue", "Strong cyan", "Strong teal", "Strong green", "Strong yellow",
+                               "Strong orange", "Strong red", "Strong pink", "Strong purple", "Strong grey"]
 
     private struct Saved: Codable { var tags: [TagDef]; var assigned: [String: Set<UUID>] }
 
