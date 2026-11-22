@@ -61,6 +61,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .frame(minWidth: 1180, minHeight: 820)
         .sheet(isPresented: $model.showingMIDI) { MIDIMappingView(midi: model.midi) }
+        .overlay { QuickPickOverlay(model: model) }
         .onAppear { pageKeys.install(model) }
         .task { await model.start() }
         .task { await model.refreshLibrary() }
@@ -357,6 +358,18 @@ extension ContentView {
                     try? rep2.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("Organize-inspector.png"))
                 }
             }
+            if page == .organize, ProcessInfo.processInfo.environment["SPINDLE_QUICKPICK"] != nil {
+                // The quick cards, for checking their look.
+                for (kind, name) in [(QuickPick.Kind.color, "colour"), (.set, "set")] {
+                    QuickPick.shared.open(kind, Array(tracks.prefix(2).map(\.url)))
+                    try? await Task.sleep(for: .seconds(1.5))
+                    if let rep3 = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: rep3)
+                        try? rep3.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("Quick-\(name).png"))
+                    }
+                    QuickPick.shared.close()
+                }
+            }
             spindleLog.notice("Snapshot: \(url.path)")
             if page == .prep {
                 model.prepSetPlaying(false)
@@ -600,6 +613,8 @@ final class PageKeys {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
             guard let model, Shortcuts.shared.forPages(event), !(event.window?.firstResponder is NSText) else { return event }
             let keys = Shortcuts.shared
+            if keys.matches(.colorMenu, event) { QuickPick.shared.open(.color, model.selectedTracks); return nil }
+            if keys.matches(.setMenu, event) { QuickPick.shared.open(.set, model.selectedTracks); return nil }
             let next = keys.matches(.nextPage, event), previous = keys.matches(.previousPage, event)
             guard next || previous else { return event }
             let pages = AppModel.Page.allCases

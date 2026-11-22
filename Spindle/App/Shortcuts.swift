@@ -55,7 +55,7 @@ nonisolated struct KeyCombo: Codable, Equatable, Hashable, Sendable {
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
     // Everywhere
-    case nextPage, previousPage
+    case nextPage, previousPage, colorMenu, setMenu
     // Organize
     case organizeLibrary, organizeTracks, organizeUp, organizeDown, organizePlay,
          organizeBack, organizeForward, organizeRename
@@ -72,7 +72,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
 
     var section: Section {
         switch self {
-        case .nextPage, .previousPage: .everywhere
+        case .nextPage, .previousPage, .colorMenu, .setMenu: .everywhere
         case .organizeLibrary, .organizeTracks, .organizeUp, .organizeDown, .organizePlay,
              .organizeBack, .organizeForward, .organizeRename: .organize
         case .mixUp, .mixDown, .mixListen, .mixBack, .mixForward, .mixLoadA, .mixLoadB: .mix
@@ -84,6 +84,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .nextPage: "Next page"
         case .previousPage: "Previous page"
+        case .colorMenu: "Colour the selected tracks"
+        case .setMenu: "Put the selected tracks in a set"
         case .organizeLibrary: "Keys work in the library"
         case .organizeTracks: "Keys work in the track list"
         case .organizeUp: "Previous track / list"
@@ -122,6 +124,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .nextPage: KeyCombo(48, "Tab")
         case .previousPage: KeyCombo(48, "Tab", shift: true)
+        case .colorMenu: KeyCombo(8, "C", shift: true)
+        case .setMenu: KeyCombo(1, "S", shift: true)
         case .organizeLibrary: KeyCombo(18, "1")
         case .organizeTracks: KeyCombo(19, "2")
         case .organizeUp, .mixUp: KeyCombo(126, "↑")
@@ -161,7 +165,7 @@ final class Shortcuts {
     /// Keys for the pages: not while a new key is being recorded, and not
     /// from the shortcuts window itself.
     func forPages(_ event: NSEvent) -> Bool {
-        !recording && event.window?.title != Self.windowTitle
+        !recording && !QuickPick.shared.isOpen && event.window?.title != Self.windowTitle
     }
 
     private init() {
