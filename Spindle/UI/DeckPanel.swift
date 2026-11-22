@@ -15,6 +15,16 @@ struct DeckPanel: View {
     /// Mix page: smaller waveform and a one-line readout.
     var compact = false
 
+    /// Mix page: the cover left of the waveforms, per deck.
+    @AppStorage private var showArt: Bool
+
+    init(deck: DeckModel, model: AppModel, compact: Bool = false) {
+        self.deck = deck
+        self.model = model
+        self.compact = compact
+        _showArt = AppStorage(wrappedValue: true, "mix.showArt.\(deck.label)")
+    }
+
     private var engine: DeckEngine? { model.engine?.decks[deck.id] }
 
     var body: some View {
@@ -68,6 +78,15 @@ struct DeckPanel: View {
                 }
             }
             Spacer()
+            if compact {
+                Button { showArt.toggle() } label: {
+                    Image(systemName: "photo").font(.system(size: 11))
+                        .foregroundStyle(showArt ? Theme.ink : Theme.inkFaint)
+                        .frame(width: 22, height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(showArt ? "Hide album art" : "Show album art")
+            }
             Button("Load…") { model.chooseFile(for: deck) }
                 .buttonStyle(FlatButtonStyle())
         }
@@ -80,6 +99,17 @@ struct DeckPanel: View {
     /// zoomed scrolling waveform below (scroll or drag to scrub, pinch or
     /// ⌘-scroll to zoom).
     private var waveforms: some View {
+        HStack(spacing: 1) {
+            if compact && showArt {
+                // Square, as tall as both waveforms (32 + 1 + 96).
+                AlbumArtImage(url: deck.track?.url).frame(width: 129, height: 129)
+            }
+            waveformStack
+        }
+        .background(Theme.line)
+    }
+
+    private var waveformStack: some View {
         VStack(spacing: 1) {
             GeometryReader { geo in
                 TrackOverview(deck: deck, telemetry: engine?.telemetry,

@@ -12,8 +12,32 @@ import AVFoundation
 import ImageIO
 import SwiftUI
 
+/// Just the cover of one track (a placeholder note when it has none).
+struct AlbumArtImage: View {
+    let url: URL?
+    @State private var art: NSImage?
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(Theme.panelRaised)
+            if let art {
+                Image(nsImage: art).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "music.note").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.inkFaint)
+            }
+        }
+        .clipped()
+        .task(id: url) {
+            guard let url else { art = nil; return }
+            art = await AlbumArt.load(url).image
+        }
+    }
+}
+
 struct AlbumArtPanel: View {
     let model: AppModel
+    /// In the sidebar: no fill to the bottom, smaller type.
+    var sidebar = false
     @State private var art: NSImage?
     @State private var title = ""
     @State private var artist = ""
@@ -41,14 +65,14 @@ struct AlbumArtPanel: View {
             .clipped()
             if url != nil {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.title).foregroundStyle(Theme.ink).lineLimit(2)
+                    Text(title).font(sidebar ? Theme.body : Theme.title).foregroundStyle(Theme.ink).lineLimit(2)
                     if !artist.isEmpty { Text(artist).font(Theme.body).foregroundStyle(Theme.inkMuted).lineLimit(1) }
                 }
             }
-            Spacer(minLength: 0)
+            if !sidebar { Spacer(minLength: 0) }
         }
-        .padding(Theme.space3)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(sidebar ? EdgeInsets(top: 0, leading: Theme.space3, bottom: Theme.space3, trailing: Theme.space3) : EdgeInsets(top: Theme.space3, leading: Theme.space3, bottom: Theme.space3, trailing: Theme.space3))
+        .frame(maxWidth: .infinity, maxHeight: sidebar ? nil : .infinity, alignment: .top)
         .background(Theme.panel)
         .task(id: url) {
             guard let url else { art = nil; title = ""; artist = ""; return }

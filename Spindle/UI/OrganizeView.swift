@@ -55,7 +55,6 @@ struct OrganizeView: View {
     }
     @State private var dropTargeted = false
     @State private var keys = OrganizeKeys()
-    @AppStorage("organize.showArt") private var showArt = true
     @State private var showFilter = false
     @State private var showGroup = false
     @State private var naming: Naming?
@@ -93,10 +92,7 @@ struct OrganizeView: View {
                     .overlay(alignment: .top) { if keys.focus == .tracks { Theme.accent.frame(height: 2) } }
                     .simultaneousGesture(TapGesture().onEnded { keys.focus = .tracks })
             }
-            if showArt {
-                AlbumArtPanel(model: model)
-                    .frame(width: 320)
-            }
+
         }
         .background(Theme.line)
         .onAppear {
@@ -149,13 +145,6 @@ struct OrganizeView: View {
             }
             SearchField(text: $library.search)
                 .frame(maxWidth: 180)
-            Button { showArt.toggle() } label: {
-                Image(systemName: "sidebar.right").font(.system(size: 12))
-                    .foregroundStyle(showArt ? Theme.ink : Theme.inkMuted)
-                    .frame(width: 24, height: 22).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(showArt ? "Hide album art" : "Show album art")
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, Theme.space2)
@@ -645,6 +634,7 @@ struct CrateList: View {
                         recentlyDeleted
                     }
                     tagSection
+                    artSection
                 }
             }
         }
@@ -828,6 +818,18 @@ struct CrateList: View {
                     onMove: { tagStore.moveOptions(from: $0, to: $1) },
                     onAdd: { _ = tagStore.create(name: $0) })
             }
+    }
+
+    /// The cover of the track you're listening to (or the selected one), at
+    /// the bottom of the list; close it from its title.
+    @ViewBuilder
+    private var artSection: some View {
+        HStack { sectionTitle("Album art"); Spacer() }
+            .padding(.horizontal, Theme.space3)
+            .padding(.top, Theme.space4)
+            .padding(.bottom, Theme.space2)
+            .overlay(alignment: .top) { sectionDivider }
+        if isOpen("Album art") { AlbumArtPanel(model: model, sidebar: true) }
     }
 
     /// A section title that opens and closes the section.
