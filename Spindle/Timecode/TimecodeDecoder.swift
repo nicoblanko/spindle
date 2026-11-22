@@ -122,6 +122,14 @@ nonisolated final class TimecodeDecoder {
     /// True once the register has matched the LFSR for 24 bits and is on the record.
     var hasPosition: Bool { validBits >= Self.lockBits && positionIndex >= 0 }
 
+    /// The needle left the record: forget the lock, so the flywheel can't
+    /// carry the old position over to wherever the needle lands.
+    func dropLock() {
+        validBits = 0
+        misses = 0
+        positionIndex = -1
+    }
+
     /// Seconds of timecode (at 0% pitch) from `startIndex`, wrapping around the
     /// sequence so positions just before the start come out negative.
     func positionSeconds(startIndex: Int = 0) -> Double {

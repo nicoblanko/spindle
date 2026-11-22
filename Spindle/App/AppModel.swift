@@ -19,7 +19,12 @@ final class DeckModel: Identifiable {
     /// Speed of the virtual turntable in simulation mode.
     var simulatedPitch: Double = 0
     var simulatorLifted = false
-    var absoluteMode = true
+    /// Absolute: the needle's place on the record is the place in the track
+    /// (needle drops jump). Relative: only the record's speed and direction
+    /// count, so needle drops don't move the track. Remembered per deck.
+    var absoluteMode = true {
+        didSet { UserDefaults.standard.set(absoluteMode, forKey: "deck.absolute.\(label)") }
+    }
     var testTone = false
     var loopActive = false
     var loopBeats = 8
@@ -48,7 +53,10 @@ final class DeckModel: Identifiable {
     /// Current speed (1 = the track's own tempo).
     var pitch: Double = 0
 
-    init(id: Int) { self.id = id }
+    init(id: Int) {
+        self.id = id
+        absoluteMode = UserDefaults.standard.object(forKey: "deck.absolute.\(id == 0 ? "A" : "B")") as? Bool ?? true
+    }
 
     // Remembered per deck and vinyl format.
     private func key(_ name: String, _ def: TimecodeDefinition) -> String { "deck\(id).\(def.id).\(name)" }
@@ -123,6 +131,8 @@ final class AppModel {
     }
     private(set) var engine: AudioEngineCore?
     private(set) var running = false
+    /// Lock losses already logged, per deck.
+    @ObservationIgnored private var lossSeen: [Int: Int32] = [:]
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
     var routing = EngineRouting()
     private var routingDeviceID: AudioDeviceID?
@@ -331,6 +341,7 @@ final class AppModel {
             core.decks[deck.id].absoluteMode = deck.absoluteMode
             if let config = deck.preferredConfig(for: definition) { core.decks[deck.id].prefer(config: config) }
             core.decks[deck.id].startIndex = deck.startIndex(for: definition) ?? 0
+            core.decks[deck.id].startKnown = deck.startIndex(for: definition) != nil
             core.decks[deck.id].toneFrequency = deck.id == 0 ? 440 : 660
             core.decks[deck.id].testTone = deck.testTone
             for kind in FXKind.allCases { core.decks[deck.id].setFX(kind, deck.fx[kind]) }
@@ -411,6 +422,18 @@ final class AppModel {
                     let t = core.decks[deck.id].telemetry.pointee
                     if t.hasPosition, deck.preferredConfig(for: core.definition) != Int(t.activeConfig) {
                         deck.setPreferredConfig(Int(t.activeConfig), for: core.definition)
+                    }
+                    // Lock lost while playing (a lift, a skip): log it, to tune
+                    // the lift detection on real records.
+                    if t.lostLockEvents != (self.lossSeen[deck.id] ?? 0) {
+                        self.lossSeen[deck.id] = t.lostLockEvents
+                        spindleLog.notice(String(format: "Deck %@: lock lost while playing, level %.0f%% of before, %@",
+                                                 deck.label, t.lastLossRatio * 100, t.lastLossCoasting ? "carried on" : "followed the signal"))
+                    }
+                    // The record's start, once the deck has learned it.
+                    if t.recordStart >= 0, deck.startIndex(for: core.definition) != t.recordStart {
+                        deck.setStartIndex(t.recordStart, for: core.definition)
+                        spindleLog.notice("Deck \(deck.label): record start learned")
                     }
                 }
                 try? await Task.sleep(for: .seconds(1))

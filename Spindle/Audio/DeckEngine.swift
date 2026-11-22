@@ -29,6 +29,11 @@ nonisolated struct DeckTelemetry {
     /// The needle left the record while the track was playing, and the deck
     /// carries on at the last speed until the needle is back.
     var coasting = false
+    /// The record's start in the timecode sequence, once learned (else -1).
+    var recordStart = -1
+    var lostLockEvents: Int32 = 0
+    var lastLossRatio: Float = 0
+    var lastLossCoasting = false
     /// When this was written (seconds, system uptime clock).
     var stamp: Double = 0
 
@@ -60,6 +65,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Position index (in the format's bit sequence) of the record's start,
     /// calibrated per deck. Set from the UI.
     var startIndex = 0
+    /// Whether `startIndex` is the record's real start (learned or saved).
+    /// Then the record maps straight onto the track, as in Traktor: needle
+    /// at the start of the record = start of the track.
+    var startKnown = false
 
     /// Plays a quiet tone (A 440 Hz, B 660 Hz) on this deck's output, to check
     /// which mixer channel it reaches. Set from the UI.
@@ -199,13 +208,19 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// before the needle left (the decoder's own reading is noise by then).
     private var pitchHistory = [Double](repeating: 0, count: 64)
     private var levelHistory = [Float](repeating: 0, count: 64)
+    private var playheadHistory = [Double](repeating: 0, count: 64)
     private var historyWrite = 0
     /// Peak input level of the last buffer.
     private var inputLevel: Float = 0
     private var coastLevel: Float = 0
     private var coastSerial = 0
     private var levelBackSamples = 0
-    /// A new lock must hold this many bits (0.3 s) before the deck follows it
+    /// Diagnostics for real needle lifts: how often the lock went while
+    /// playing, the level then against just before, and whether it coasted.
+    private var lostLockEvents = 0
+    private var lastLossRatio: Float = 0
+    private var lastLossCoasting = false
+    /// A new lock must hold this many bits (0.12 s) before the deck follows it
     /// again: a false lock on landing drops out well before that.
     private let confirmBits: Int
 
@@ -213,7 +228,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         self.sampleRate = sampleRate
         decoders = DecoderConfig.all.map { TimecodeDecoder(config: $0, definition: definition, sampleRate: sampleRate) }
         canSearch = definition.decodesPosition
-        confirmBits = Int(0.3 * definition.bitRate)
+        confirmBits = Int(0.12 * definition.bitRate)
         clickDecay = Float(exp(-1 / (0.025 * sampleRate)))
         effects = FXChain(sampleRate: sampleRate)
         motionStep = Float(1 / (0.004 * sampleRate))
@@ -285,7 +300,13 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         if cueRequest {
             cueRequest = false
             playhead = 0
-            anchorPending = true
+            coasting = false          // a new track waits for the needle
+            if absoluteMode && startKnown {
+                trackOffset = 0       // the record is the track
+                anchorPending = false
+            } else {
+                anchorPending = true  // tie the track to where the needle is
+            }
         }
         if !jumpRequest.isNaN {
             let delta = jumpRequest - playhead
@@ -304,6 +325,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             if coasting {
                 target = coastPitch
             }
+            learnStart(decoder)
             if anchorPending && decoder.hasPosition && !coasting {
                 // Tie the track to the record where it is now.
                 trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
@@ -313,6 +335,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
             if absolute {
                 let error = position - playhead
+                let length = track.load(ordering: .acquiring)
+                    .map { $0.assumingMemoryBound(to: TrackSamples.self).pointee }
+                    .map { Double($0.frames) / $0.sampleRate } ?? .infinity
+                _ = length
                 if abs(error) > 0.15 {
                     startFade(from: playhead)
                     playhead = position                  // needle drop
@@ -466,6 +492,15 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             }
         }
         rate = target
+        if wasLocked && !decoder.hasPosition && !internalMode {
+            let old = (historyWrite - 10 + pitchHistory.count) % pitchHistory.count
+            let before = levelHistory[old]
+            if abs(pitchHistory[old]) > 0.5 && before > 0 {
+                lostLockEvents &+= 1
+                lastLossRatio = inputLevel / before
+                lastLossCoasting = coasting
+            }
+        }
         wasLocked = decoder.hasPosition
         samplesSinceLock = decoder.hasPosition ? 0 : samplesSinceLock + frames
 
@@ -482,6 +517,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             activeConfig: Int32(active),
             validBits: Int32(decoder.validBits),
             coasting: coasting,
+            recordStart: startKnown ? startIndex : -1,
+            lostLockEvents: Int32(truncatingIfNeeded: lostLockEvents),
+            lastLossRatio: lastLossRatio,
+            lastLossCoasting: lastLossCoasting,
             stamp: DeckTelemetry.now)
     }
 
@@ -509,7 +548,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 levelBackSamples = 0
             }
             let back = Double(levelBackSamples) / sampleRate
-            let freshLock = decoder.hasPosition && decoder.lockSerial != coastSerial && decoder.validBits >= confirmBits
+            // Every lock was dropped when the needle came up, so any
+            // confirmed lock now is the needle's new place.
+            let freshLock = decoder.hasPosition && decoder.validBits >= confirmBits
             if back > 0.02 && (freshLock || (back > 1.5 && decoder.hasPosition)) {
                 coasting = false
                 // Absolute mode: wherever the needle lands is where the track
@@ -522,23 +563,59 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 }
             }
         } else {
-            let earlier = back(0.04), recent = back(0.01)
-            let p40 = pitchHistory[earlier], p10 = pitchHistory[recent]
-            let level40 = levelHistory[earlier]
-            let steady = abs(p10 - p40) < 0.06 * abs(p40) && abs(p40) > 0.5 && abs(p40) < 1.6
-            if wasLocked && steady && level40 > 0.005 && inputLevel < level40 * 0.2 {
+            // Judge the speed from 60–120 ms back: by the time the level has
+            // fallen, the last few buffers already hold the scratchy reading
+            // of a needle leaving the groove.
+            let old = back(0.12), mid = back(0.06)
+            let p120 = pitchHistory[old], p60 = pitchHistory[mid]
+            let level120 = levelHistory[old]
+            let steady = abs(p60 - p120) < 0.06 * abs(p120) && abs(p120) > 0.5 && abs(p120) < 1.6
+            // A hand stopping the record also lowers the level, but the
+            // decoder keeps reading it, slowing down: that's not a lift.
+            let slowing = decoder.hasPosition && abs(decoder.pitch) < abs(p120) * 0.9
+            if wasLocked && steady && !slowing && level120 > 0.005 && inputLevel < level120 * 0.35 {
                 coasting = true
-                coastPitch = p40
-                coastLevel = level40
+                for d in decoders { d.dropLock() }
+                coastPitch = (p60 + p120) / 2
+                coastLevel = level120
                 coastSerial = decoder.lockSerial
                 coastSamples = 0
                 levelBackSamples = 0
+                // Undo the slide: put the track where it would be had it
+                // carried on at that speed since 60 ms ago.
+                let n = Double((historyWrite - mid + count) % count)
+                let expected = playheadHistory[mid] + coastPitch * n * bufferSeconds
+                if abs(expected - playhead) > 0.003 {
+                    startFade(from: playhead)
+                    playhead = expected
+                }
             }
         }
 
         pitchHistory[historyWrite] = decoder.pitch
         levelHistory[historyWrite] = inputLevel
+        playheadHistory[historyWrite] = playhead
         historyWrite = (historyWrite + 1) % count
+    }
+
+    /// The record's start is the earliest groove that has played steadily
+    /// (a confirmed lock, forwards at about normal speed). Playing from an
+    /// earlier groove moves it there. The first time it's learned, the track
+    /// starts at that groove.
+    private func learnStart(_ decoder: TimecodeDecoder) {
+        guard absoluteMode, decoder.hasPosition, !coasting, decoder.validBits >= confirmBits,
+              decoder.pitch > 0.6, decoder.pitch < 1.4 else { return }
+        let here = decoder.positionSeconds(startIndex: startIndex)
+        guard !startKnown || here < -0.5 else { return }
+        // Where the record starts: here, less how far into the run of
+        // confirmed bits we already are, so the start is the landing groove.
+        startIndex = decoder.positionIndex - decoder.validBits
+        startKnown = true
+        trackOffset = 0
+        anchorPending = false
+        let since = decoder.positionSeconds(startIndex: startIndex)
+        if abs(playhead - since) > 0.15 { startFade(from: playhead) }
+        playhead = since
     }
 
     @inline(__always)
@@ -589,51 +666,127 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                       run(nudge: false), run(nudge: true), run(nudge: false, stopped: true))
     }
 
-    /// Self-test: a simulated MK2 record plays, the needle is lifted for
-    /// `up` seconds while the platter turns on, and put down 90 s further
-    /// in. Reports where the track is against where the needle says, every
-    /// half second after landing (0 = following the record).
+    /// Self-test on a simulated MK2 record (the needle comes up the way a
+    /// real one does: ~30 ms of fading, scratchy signal):
+    ///  · drops: needle up 0.5 s / 2.5 s, down 90 s further on; track minus
+    ///    record every half second after landing (0 = following)
+    ///  · slide: how far the track strays in the 0.4 s after the lift
+    ///  · mix in: start learned at the first groove played (60 s), a new
+    ///    track loaded with the needle at 200 s, needle moved back to 60 s;
+    ///    the playhead every half second after landing (should be ~0.5, 1…)
     static func needleTest() -> String {
-        let rate = 48000.0, block = 128
-        func run(up: Double) -> String {
+        let rate = 48000.0, block = 128, def = TimecodeDefinition.traktorMK2
+        func makeTrack() -> UnsafeMutablePointer<TrackSamples> {
             let frames = Int(rate * 600)
             let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
             l.initialize(repeating: 0, count: frames); r.initialize(repeating: 0, count: frames)
             let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
             samples.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
-            let deck = DeckEngine(definition: .traktorMK2, sampleRate: rate)
-            _ = deck.exchangeTrack(samples)
-            let sim = TimecodeSimulator(definition: .traktorMK2, startSeconds: 60)
-            sim.targetPitch = 1
-            let inL = UnsafeMutablePointer<Float>.allocate(capacity: block), inR = UnsafeMutablePointer<Float>.allocate(capacity: block)
-            let outL = UnsafeMutablePointer<Float>.allocate(capacity: block), outR = UnsafeMutablePointer<Float>.allocate(capacity: block)
-            var t = 0.0, offset: Double?
-            var report: [String] = []
-            let liftAt = 4.0, dropAt = 4.0 + up
-            var nextMark = dropAt + 0.5
-            while t < dropAt + 3.01 {
-                if t >= liftAt && t < dropAt { sim.lifted = true }
-                if sim.lifted && t >= dropAt {
-                    sim.seek(seconds: sim.phase / TimecodeDefinition.traktorMK2.resolution + 90)
-                    sim.lifted = false
-                }
+            return samples
+        }
+        let inL = UnsafeMutablePointer<Float>.allocate(capacity: block), inR = UnsafeMutablePointer<Float>.allocate(capacity: block)
+        let outL = UnsafeMutablePointer<Float>.allocate(capacity: block), outR = UnsafeMutablePointer<Float>.allocate(capacity: block)
+        defer { [inL, inR, outL, outR].forEach { $0.deallocate() } }
+
+        /// Plays until `until`, calling `each` after every block with the time.
+        func play(_ deck: DeckEngine, _ sim: TimecodeSimulator, _ t: inout Double, until: Double, _ each: (Double) -> Void = { _ in }) {
+            while t < until {
                 sim.generate(left: inL, right: inR, frames: block, sampleRate: rate)
                 deck.decode(left: inL, right: inR, frames: block)
                 deck.render(left: outL, right: outR, frames: block, mix: false)
                 t += Double(block) / rate
-                let needle = sim.phase / TimecodeDefinition.traktorMK2.resolution
-                let play = deck.telemetry.pointee.playhead
-                if offset == nil && t > 2 { offset = needle - play }
-                if t >= nextMark, let offset {
-                    report.append(String(format: "%+.2f", play - (needle - offset)))
-                    nextMark += 0.5
+                each(t)
+            }
+        }
+        func needle(_ sim: TimecodeSimulator) -> Double { sim.phase / def.resolution }
+
+        func drop(up: Double) -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let track = makeTrack()
+            _ = deck.exchangeTrack(track)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 60)
+            sim.realisticLift = true
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 4)
+            let offset = needle(sim) - deck.telemetry.pointee.playhead
+            // The lift: how far the track strays from steady play.
+            let liftPlay = deck.telemetry.pointee.playhead, liftT = t
+            var slide = 0.0
+            sim.lifted = true
+            play(deck, sim, &t, until: 4 + min(up, 0.4)) { now in
+                slide = max(slide, abs(deck.telemetry.pointee.playhead - (liftPlay + (now - liftT))))
+            }
+            play(deck, sim, &t, until: 4 + up)
+            sim.seek(seconds: needle(sim) + 90)
+            sim.lifted = false
+            var marks: [String] = []
+            var next = t + 0.1
+            play(deck, sim, &t, until: t + 1.01) { now in
+                if now >= next {
+                    marks.append(String(format: "%+.2f", deck.telemetry.pointee.playhead - (needle(sim) - offset)))
+                    next += 0.1
                 }
             }
-            samples.pointee.free(); samples.deallocate()
-            [inL, inR, outL, outR].forEach { $0.deallocate() }
-            return "up \(up) s: " + report.joined(separator: " ")
+            track.pointee.free(); track.deallocate()
+            return String(format: "up %.1f s: slide %.3f s, then ", up, slide) + marks.joined(separator: " ")
         }
-        return "Needle test (track minus record, s): " + run(up: 0.5) + " | " + run(up: 2.5)
+
+        func mixIn() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let first = makeTrack()
+            _ = deck.exchangeTrack(first)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 60)
+            sim.realisticLift = true
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 3)                 // learns the start at ~60 s
+            sim.lifted = true
+            play(deck, sim, &t, until: 3.5)
+            sim.seek(seconds: 200)
+            sim.lifted = false
+            play(deck, sim, &t, until: 5)                 // needle mid-record
+            let second = makeTrack()
+            let old = deck.exchangeTrack(second)          // load the next track there
+            play(deck, sim, &t, until: 6)
+            let atLoad = deck.telemetry.pointee.playhead
+            sim.lifted = true
+            play(deck, sim, &t, until: 8)                 // tonearm moved by hand
+            sim.seek(seconds: 60)
+            sim.lifted = false
+            var marks: [String] = []
+            var next = t + 0.1
+            play(deck, sim, &t, until: t + 2.01) { now in
+                if now >= next {
+                    let tel = deck.telemetry.pointee
+                    marks.append(String(format: "%.2f%@%@/%d", tel.playhead, tel.coasting ? "c" : "", tel.hasPosition ? "" : "?", tel.validBits))
+                    next += 0.1
+                }
+            }
+            old?.pointee.free(); old?.deallocate()
+            second.pointee.free(); second.deallocate()
+            return String(format: "loaded at 200 s → %.1f s into the track; back at the start: ", atLoad) + marks.joined(separator: " ")
+        }
+
+        func handStop() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let track = makeTrack()
+            _ = deck.exchangeTrack(track)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 60)
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 3)
+            sim.targetPitch = 0                            // a hand on the record
+            var coasted = false
+            play(deck, sim, &t, until: 4) { _ in coasted = coasted || deck.telemetry.pointee.coasting }
+            let a = deck.telemetry.pointee.playhead
+            play(deck, sim, &t, until: 5)
+            let moved = deck.telemetry.pointee.playhead - a
+            track.pointee.free(); track.deallocate()
+            return String(format: "hand stop: %@, moved %.3f s in the next second", coasted ? "CARRIED ON (wrong)" : "stopped", moved)
+        }
+
+        return "Needle test · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while

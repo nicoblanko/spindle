@@ -31,7 +31,14 @@ nonisolated final class TimecodeSimulator {
 
     /// Needle lifted off the record: only a little noise reaches the input,
     /// while the platter keeps turning.
-    var lifted = false
+    var lifted = false {
+        didSet { if lifted && !oldValue { liftSamples = 0 } }
+    }
+    /// A real lift isn't a clean cut: for ~30 ms the stylus scrapes out of
+    /// the groove, the carrier fades and its phase wanders.
+    var realisticLift = false
+    private var liftSamples = 0
+    private var wobble = 0.0
     private var noise: UInt32 = 0x12345
 
     /// Set from the UI to drop the needle; applied on the audio thread.
@@ -96,17 +103,24 @@ nonisolated final class TimecodeSimulator {
             if index != codeIndex { seek(toIndex: index) }
 
             var l: Float, r: Float
-            if lifted {
+            var fade: Float = 1
+            if lifted && realisticLift {
+                liftSamples += 1
+                fade = max(0, 1 - Float(liftSamples) / Float(0.03 * sampleRate))
+                noise = noise &* 1664525 &+ 1013904223
+                wobble += (Double(noise >> 8) / Double(1 << 24) - 0.5) * 0.6
+            }
+            if lifted && fade <= 0 {
                 noise = noise &* 1664525 &+ 1013904223
                 l = (Float(noise >> 8) / Float(1 << 24) - 0.5) * 0.001
                 r = l
             } else if mk2 {
-                let theta = 2 * Double.pi * phase
+                let theta = 2 * Double.pi * phase + wobble
                 let inFrame = Int(phase.rounded(.down)) - index * 5
                 let high = inFrame < 2 ? definition.bit(of: farCode) : definition.bit(of: code)
                 let offset: Float = high ? 0.04 : -0.04
-                l = Float(sin(theta)) * 0.12 + offset
-                r = Float(cos(theta)) * 0.12 + offset
+                l = (Float(sin(theta)) * 0.12 + offset) * fade
+                r = (Float(cos(theta)) * 0.12 + offset) * fade
             } else {
                 let amplitude: Float = !definition.decodesPosition || definition.bit(of: code) ? 0.3 : 0.2
                 let theta = 2 * Double.pi * phase
@@ -118,6 +132,7 @@ nonisolated final class TimecodeSimulator {
                 hpL = coupling * (hpL + l - lastL); lastL = l; l = hpL
                 hpR = coupling * (hpR + r - lastR); lastR = r; r = hpR
             }
+            if !lifted { wobble = 0 }
             left[i] = l
             right[i] = r
         }

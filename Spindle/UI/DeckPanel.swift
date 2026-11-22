@@ -78,6 +78,25 @@ struct DeckPanel: View {
                 }
             }
             Spacer()
+            if compact && model.controlMode != .laptop {
+                // Traktor's two vinyl modes.
+                HStack(spacing: 1) {
+                    ForEach([true, false], id: \.self) { abs in
+                        let on = deck.absoluteMode == abs
+                        Button { model.setAbsolute(abs, deck: deck) } label: {
+                            Text(abs ? "ABS" : "REL")
+                                .font(Theme.mono(10, .semibold))
+                                .foregroundStyle(on ? Theme.onAccent : Theme.inkMuted)
+                                .frame(width: 34, height: 18)
+                                .background(on ? deck.color : Theme.control)
+                        }
+                        .buttonStyle(.plain)
+                        .help(abs ? "Absolute: the needle's place on the record is the place in the track; needle drops jump"
+                                  : "Relative: only the record's speed and direction count; needle drops don't move the track")
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusSm))
+            }
             if compact {
                 Button { showArt.toggle() } label: {
                     Image(systemName: "photo").font(.system(size: 11))
