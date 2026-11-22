@@ -208,9 +208,6 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// A new lock must hold this many bits (0.3 s) before the deck follows it
     /// again: a false lock on landing drops out well before that.
     private let confirmBits: Int
-    /// A needle that is up for longer than this was put back (the record ran
-    /// out): the track carries on. A shorter hop is a needle drop.
-    static let returnSeconds = 1.0
 
     init(definition: TimecodeDefinition, sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -491,8 +488,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// The input level fell away at once while the record was turning
     /// steadily: the needle was lifted or ran off the end. Keep playing at that
     /// speed. When the needle is back and the decoder has locked afresh, a
-    /// needle that was up for a while carries the track on from where it is;
-    /// a quick hop in absolute mode stays a needle drop.
+    /// landing in absolute mode is always a needle drop.
     private func updateCoasting(decoder: TimecodeDecoder, frames: Int) {
         if stopCoastRequest {
             stopCoastRequest = false
@@ -516,9 +512,13 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             let freshLock = decoder.hasPosition && decoder.lockSerial != coastSerial && decoder.validBits >= confirmBits
             if back > 0.02 && (freshLock || (back > 1.5 && decoder.hasPosition)) {
                 coasting = false
-                let upFor = Double(coastSamples - levelBackSamples) / sampleRate
-                if !absoluteMode || upFor > Self.returnSeconds {
-                    anchorPending = true          // carry on from the playhead
+                // Absolute mode: wherever the needle lands is where the track
+                // plays, however long it was up (as in Traktor). Moving the
+                // tonearm by hand takes longer than a second, and treating
+                // that as "put back" left the track out of step with the
+                // record. Relative mode carries on from the playhead.
+                if !absoluteMode {
+                    anchorPending = true
                 }
             }
         } else {
@@ -587,6 +587,53 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         }
         return String(format: "Scrub test: largest sample step with jumps %.3f, with nudges %.3f (clean tone ≈ 0.029); loudest output scrolling while stopped %.4f (should be 0)",
                       run(nudge: false), run(nudge: true), run(nudge: false, stopped: true))
+    }
+
+    /// Self-test: a simulated MK2 record plays, the needle is lifted for
+    /// `up` seconds while the platter turns on, and put down 90 s further
+    /// in. Reports where the track is against where the needle says, every
+    /// half second after landing (0 = following the record).
+    static func needleTest() -> String {
+        let rate = 48000.0, block = 128
+        func run(up: Double) -> String {
+            let frames = Int(rate * 600)
+            let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            l.initialize(repeating: 0, count: frames); r.initialize(repeating: 0, count: frames)
+            let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+            samples.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+            let deck = DeckEngine(definition: .traktorMK2, sampleRate: rate)
+            _ = deck.exchangeTrack(samples)
+            let sim = TimecodeSimulator(definition: .traktorMK2, startSeconds: 60)
+            sim.targetPitch = 1
+            let inL = UnsafeMutablePointer<Float>.allocate(capacity: block), inR = UnsafeMutablePointer<Float>.allocate(capacity: block)
+            let outL = UnsafeMutablePointer<Float>.allocate(capacity: block), outR = UnsafeMutablePointer<Float>.allocate(capacity: block)
+            var t = 0.0, offset: Double?
+            var report: [String] = []
+            let liftAt = 4.0, dropAt = 4.0 + up
+            var nextMark = dropAt + 0.5
+            while t < dropAt + 3.01 {
+                if t >= liftAt && t < dropAt { sim.lifted = true }
+                if sim.lifted && t >= dropAt {
+                    sim.seek(seconds: sim.phase / TimecodeDefinition.traktorMK2.resolution + 90)
+                    sim.lifted = false
+                }
+                sim.generate(left: inL, right: inR, frames: block, sampleRate: rate)
+                deck.decode(left: inL, right: inR, frames: block)
+                deck.render(left: outL, right: outR, frames: block, mix: false)
+                t += Double(block) / rate
+                let needle = sim.phase / TimecodeDefinition.traktorMK2.resolution
+                let play = deck.telemetry.pointee.playhead
+                if offset == nil && t > 2 { offset = needle - play }
+                if t >= nextMark, let offset {
+                    report.append(String(format: "%+.2f", play - (needle - offset)))
+                    nextMark += 0.5
+                }
+            }
+            samples.pointee.free(); samples.deallocate()
+            [inL, inR, outL, outR].forEach { $0.deallocate() }
+            return "up \(up) s: " + report.joined(separator: " ")
+        }
+        return "Needle test (track minus record, s): " + run(up: 0.5) + " | " + run(up: 2.5)
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while

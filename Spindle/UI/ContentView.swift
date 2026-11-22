@@ -116,6 +116,7 @@ extension ContentView {
         if ProcessInfo.processInfo.environment["SPINDLE_SCRUBTEST"] != nil {
             spindleLog.notice("\(DeckEngine.scrubTest())")
             spindleLog.notice("\(DeckEngine.loopTest())")
+            spindleLog.notice("\(DeckEngine.needleTest())")
             return
         }
         if ProcessInfo.processInfo.environment["SPINDLE_GRIDTRUTH"] != nil {
