@@ -105,6 +105,8 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// the first lock, if the record isn't locked yet).
     var cueRequest = false
     private var anchorPending = false
+    /// The needle is in the lead-in: the track holds at its start.
+    private var leadIn = false
     private var samplesSinceLock = Int.max / 2
 
     var toneFrequency: Double = 440
@@ -332,8 +334,19 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
                 anchorPending = false
             }
-            position = decoder.positionSeconds(startIndex: startIndex) - trackOffset
-            absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting
+            let onRecord = decoder.positionSeconds(startIndex: startIndex)
+            // The lead-in (needle on the edge, before the side's first
+            // groove): the track waits at its start and begins as the needle
+            // reaches the first groove, as in Traktor.
+            leadIn = absoluteMode && startKnown && decoder.hasPosition && !anchorPending
+                && onRecord < 0 && onRecord > -30
+            if leadIn {
+                trackOffset = 0
+                if playhead != 0 { startFade(from: playhead); playhead = 0 }
+                target = 0
+            }
+            position = onRecord - trackOffset
+            absolute = absoluteMode && decoder.hasPosition && !anchorPending && !coasting && !leadIn
             if absolute {
                 let error = position - playhead
                 let length = track.load(ordering: .acquiring)
@@ -957,12 +970,12 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             sim.targetPitch = 1
             var t = 0.0
             var marks: [String] = []
-            var next = 0.5
-            play(deck, sim, &t, until: 2.01) { now in
-                if now >= next { marks.append(String(format: "%.2f", deck.telemetry.pointee.playhead)); next += 0.5 }
+            var next = 1.0
+            play(deck, sim, &t, until: 11.01) { now in
+                if now >= next { marks.append(String(format: "%.2f", deck.telemetry.pointee.playhead)); next += 1 }
             }
             track.pointee.free(); track.deallocate()
-            return "side 2, needle at its edge: " + marks.joined(separator: " ")
+            return "side 2, needle 8.3 s before its first groove, each second: " + marks.joined(separator: " ")
         }
 
         return "Needle test · " + sideTwo() + " · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
