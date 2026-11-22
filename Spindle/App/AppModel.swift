@@ -359,6 +359,7 @@ final class AppModel {
         }
         engine = core
         running = true
+        startCapture(core)
         updateGains()
         rememberLocks()
         monitorDecks()
@@ -393,8 +394,27 @@ final class AppModel {
         attachPreview()
     }
 
+    /// SPINDLE_CAPTURE: writes each deck's raw timecode input to
+    /// ~/Library/Logs/spindle-capture-A/B.wav while the engine runs, and
+    /// logs loads with their place in the capture, so a real session can be
+    /// replayed offline (SPINDLE_REPLAY).
+    private func startCapture(_ core: AudioEngineCore) {
+        guard ProcessInfo.processInfo.environment["SPINDLE_CAPTURE"] != nil, !core.simulate, !core.laptop else { return }
+        let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs")
+        captureWriters = core.captureTaps.enumerated().compactMap { i, tap in
+            let url = dir.appendingPathComponent("spindle-capture-\(i == 0 ? "A" : "B").wav")
+            try? FileManager.default.removeItem(at: url)
+            guard let w = try? SessionWriter(url: url, sampleRate: core.sampleRate, tap: tap) else { return nil }
+            w.start()
+            return w
+        }
+        spindleLog.notice("Capture on: \(captureWriters.count) deck input(s) → \(dir.path)/spindle-capture-A/B.wav")
+    }
+
     func stop() {
         guard let engine else { return }
+        for w in captureWriters { _ = w.stop() }
+        captureWriters = []
         engine.stop()
         for deck in engine.decks { _ = deck.exchangeTrack(nil) }
         _ = engine.preview.exchangeTrack(nil)
@@ -405,6 +425,10 @@ final class AppModel {
 
     func load(url: URL, into deck: DeckModel, fromStack: Bool = false) async {
         spindleLog.notice("Loading \(url.lastPathComponent) into deck \(deck.label)")
+        if let engine, !captureWriters.isEmpty {
+            spindleLog.notice(String(format: "Capture: deck %@ load at %.3f s", deck.label,
+                                     Double(engine.captureTaps[deck.id].framesWritten) / engine.sampleRate))
+        }
         deck.loading = true
         deck.error = nil
         defer { deck.loading = false }
@@ -444,6 +468,7 @@ final class AppModel {
     /// start has the right direction straight away.
     // MARK: Record survey
 
+    @ObservationIgnored private var captureWriters: [SessionWriter] = []
     /// SPINDLE_SURVEY=1: while a record plays from start to finish, log where
     /// the needle is, how well it reads and how often the lock goes, every
     /// 5 s, and a summary when the record stops (the needle reached the end).

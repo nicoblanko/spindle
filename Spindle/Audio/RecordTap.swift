@@ -50,6 +50,9 @@ nonisolated final class RecordTap: @unchecked Sendable {
         written.store(w + frames * 2, ordering: .releasing)
     }
 
+    /// Frames handed over since the tap was armed (capture time line).
+    var framesWritten: Int { written.load(ordering: .relaxed) / 2 }
+
     /// Recorder thread: moves everything waiting into `left`/`right`.
     func drain(left: inout [Float], right: inout [Float]) {
         let w = written.load(ordering: .acquiring)

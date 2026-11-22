@@ -6,6 +6,7 @@
 //  playhead and plays the loaded track at the record's speed.
 //
 
+import AVFoundation
 import Foundation
 import Synchronization
 
@@ -38,6 +39,11 @@ nonisolated struct DeckTelemetry {
     var lastLossCoasting = false
     /// When this was written (seconds, system uptime clock).
     var stamp: Double = 0
+    /// Diagnostics (replay): the speed the track actually played this
+    /// buffer, whether the lead-in hold was on, and the record position.
+    var played: Double = 0
+    var leadIn = false
+    var onRecord: Double = 0
 
     /// The playhead now, between audio buffers: where it was at `stamp`
     /// plus how far it has moved since at the current speed. Waveforms use
@@ -243,7 +249,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         self.sampleRate = sampleRate
         decoders = DecoderConfig.all.map { TimecodeDecoder(config: $0, definition: definition, sampleRate: sampleRate) }
         canSearch = definition.decodesPosition
-        confirmBits = Int(0.12 * definition.bitRate)
+        confirmBits = TimecodeDecoder.lockBits + 12
         clickDecay = Float(exp(-1 / (0.025 * sampleRate)))
         effects = FXChain(sampleRate: sampleRate)
         motionStep = Float(1 / (0.004 * sampleRate))
@@ -275,11 +281,23 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Samples since the active decoder last had position. While it holds lock
     /// only that decoder runs; after 0.5 s without lock all of them search again.
     private var unlockedSamples = Int.max / 2
+    private var wasSearching = false
+    private var landingSamples = 0
+    private var lastLockID = -1
 
     func decode(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int) {
         let current = decoders[active]
         // No carrier (needle up, record stopped): nothing to search for.
         let searching = canSearch && unlockedSamples > Int(sampleRate * 0.5) && current.envelope > 0.002 && abs(current.pitch) > 0.02
+        // The other decoders sat idle since they last ran and still hold the
+        // lock they had then. Measured on a real record: one of them would
+        // "lock" at once on that old place (seconds away), so a fast spin
+        // threw the track back to wherever the needle once was. They start
+        // a search with nothing.
+        if searching && !wasSearching {
+            for (i, d) in decoders.enumerated() where i != active { d.dropLock() }
+        }
+        wasSearching = searching
         var peak: Float = 0
         for i in 0..<frames {
             let l = left[i], r = right[i]
@@ -343,6 +361,13 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             if inputLevel < 0.02 { quietSamples += frames } else if decoder.hasPosition { quietSamples = 0 }
             if quietSamples > Int(0.1 * sampleRate) { sinceLanding = 0 }
             else if decoder.hasPosition && decoder.validBits >= confirmBits { sinceLanding += frames }
+            // The needle just came down and the place isn't read yet: wait in
+            // silence instead of playing on from where the track was (that
+            // was the slip on every needle drop). If it can't be read within
+            // 0.4 s, follow the speed after all.
+            let landing = quietSamples > Int(0.1 * sampleRate) && inputLevel >= 0.02
+            landingSamples = landing ? landingSamples + frames : 0
+            if landing && absoluteMode && landingSamples < Int(0.4 * sampleRate) { target = 0 }
             findSide(decoder)
             if anchorPending && decoder.hasPosition && !coasting {
                 // Tie the track to the record where it is now.
@@ -353,8 +378,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             // The lead-in (needle on the edge, before the side's first
             // groove): the track waits at its start and begins as the needle
             // reaches the first groove, as in Traktor.
+            let confirmed = decoder.hasPosition && decoder.validBits >= confirmBits
             leadIn = absoluteMode && startKnown && decoder.hasPosition && !anchorPending
-                && onRecord < 0 && onRecord > -30
+                && onRecord < 0 && onRecord > -30 && (confirmed || leadIn)
             if leadIn {
                 trackOffset = 0
                 if playhead != 0 { startFade(from: playhead); playhead = 0 }
@@ -367,40 +393,39 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 let length = track.load(ordering: .acquiring)
                     .map { $0.assumingMemoryBound(to: TrackSamples.self).pointee }
                     .map { Double($0.frames) / $0.sampleRate } ?? .infinity
-                _ = length
-                // As in Mixxx (vinylcontrolxwax.cpp): the track runs at the
-                // record's speed and only jumps on a real needle drop, not on
-                // every small difference a reading glitch makes. A jump needs
-                // a confirmed reading more than half a second away; smaller
-                // differences are taken up gently, at most 3% speed, which
-                // you don't hear.
-                // Jumps only where they belong: just after the needle came
-                // down (or a track was loaded), or for a gap no spin can make.
-                // While a hand moves the record, differences are taken up
-                // smoothly instead (Mixxx doesn't resync while scratching
-                // either): each jump is a little crossfade, and a run of them
-                // stutters.
-                let mayJump = sinceLanding < Int(sampleRate) || abs(error) > 5
-                if abs(error) > 0.5 && mayJump {
-                    if decoder.validBits >= confirmBits {
-                        startFade(from: playhead)
-                        jumpCount &+= 1
-                        lastJump = position - playhead
-                        if position > length - 1 || position < -2 {
-                            // The needle is past the end of the track (or well
-                            // before its start): the track starts at this groove,
-                            // so wherever the needle goes down, it plays.
-                            trackOffset += position
-                            playhead = 0
-                            position = 0
-                        } else {
-                            playhead = position          // needle drop within the track
-                        }
+                // As in Mixxx (vinylcontrolxwax.cpp) the track runs at the
+                // record's speed; the position only steers it.
+                // A fresh lock (the needle just came down, or the reading came
+                // back after a spin) puts the track where the record is, with
+                // a short crossfade. Taking up seconds of difference by
+                // playing faster was what made it slide after a spin.
+                let lockID = active << 32 | decoder.lockSerial
+                let fresh = confirmed && lockID != lastLockID
+                if confirmed { lastLockID = lockID }
+                // Landing: 0.1 s. A fresh lock while the record clearly moves: 50 ms
+                // (while the needle scrapes on a lift the reading jitters by
+                // ±40 ms, which mustn't make it jump back and forth).
+                let jumpFrom = sinceLanding < Int(sampleRate) ? 0.1 : (fresh && abs(decoder.pitch) > 0.5 ? 0.05 : 1.5)
+                if confirmed && abs(error) > jumpFrom {
+                    startFade(from: playhead)
+                    jumpCount &+= 1
+                    lastJump = position - playhead
+                    if position > length - 1 || position < -2 {
+                        // The needle is past the end of the track (or well
+                        // before its start): the track starts at this groove,
+                        // so wherever the needle goes down, it plays.
+                        trackOffset += position
+                        playhead = 0
+                        position = 0
+                    } else {
+                        playhead = position          // needle drop within the track
                     }
-                } else {
-                    // Inaudible at normal speed (3%); more room the faster the
-                    // record moves.
-                    let room = 0.03 + 0.15 * abs(decoder.pitch)
+                } else if confirmed {
+                    // Small differences (a reading glitch, the speed estimate
+                    // a hair off) are taken up gently: at most 2% around
+                    // normal speed, which you don't hear; more room when the
+                    // record moves faster than that.
+                    let room = 0.02 + 0.15 * max(abs(decoder.pitch) - 1, 0)
                     target += min(max(error * 2, -room), room)
                 }
             }
@@ -581,7 +606,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             lostLockEvents: Int32(truncatingIfNeeded: lostLockEvents),
             lastLossRatio: lastLossRatio,
             lastLossCoasting: lastLossCoasting,
-            stamp: DeckTelemetry.now)
+            stamp: DeckTelemetry.now,
+            played: target,
+            leadIn: leadIn,
+            onRecord: decoder.hasPosition ? decoder.positionSeconds(startIndex: startIndex) : .nan)
     }
 
     /// The input level fell away at once while the record was turning
@@ -931,7 +959,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             sim.targetPitch = 1
             var t = 0.0
             play(deck, sim, &t, until: 3)
-            sim.inertia = 0.02                          // a hand: ~1 ms to change speed
+            // A hand turning the record round: ~10 ms (measured on real
+            // scratches: 35–120 ms below 1.5×, so this is on the fast side).
+            sim.inertia = 0.002
             let offset = needle(sim) - deck.telemetry.pointee.playhead
             var worst = 0.0
             func gap() -> Double { deck.telemetry.pointee.playhead - (needle(sim) - offset) }
@@ -1047,6 +1077,67 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while
     /// playing (like a loop slot pressed mid-beat) and report the gaps
     /// between clicks in the output (all should be one beat, 468.75 ms).
+    /// SPINDLE_REPLAY=<wav>: runs a captured deck input (SPINDLE_CAPTURE)
+    /// through a deck as the app would, with a 296 s track loaded at the
+    /// given seconds, and writes a trace (one row per 128-frame buffer) to
+    /// `out`. Returns a summary.
+    static func replay(path: String, out: String, vinyl: TimecodeDefinition, absolute: Bool, loads: [Double]) -> String {
+        guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: buffer)) != nil, let ch = buffer.floatChannelData else { return "Replay: can't read \(path)" }
+        let rate = file.processingFormat.sampleRate, total = Int(buffer.frameLength), block = 128
+        let deck = DeckEngine(definition: vinyl, sampleRate: rate)
+        deck.absoluteMode = absolute
+        deck.startIndex = vinyl.sideStarts[0]
+        deck.startKnown = false
+        var tracks: [UnsafeMutablePointer<TrackSamples>] = []
+        func makeTrack() -> UnsafeMutablePointer<TrackSamples> {
+            let frames = Int(rate * 296.3)
+            let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            l.initialize(repeating: 0, count: frames); r.initialize(repeating: 0, count: frames)
+            let t = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+            t.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+            tracks.append(t)
+            return t
+        }
+        let outL = UnsafeMutablePointer<Float>.allocate(capacity: block), outR = UnsafeMutablePointer<Float>.allocate(capacity: block)
+        var pending = loads.sorted()
+        var rows = "t,level,signal,has,bits,config,index,onRecord,pitch,played,playhead,leadIn,absolute,jumps\n"
+        rows.reserveCapacity(total / block * 90)
+        var probeRows = "t,config,pitch,jump,cycle,offset\n"
+        var probeT = 0.0
+        if let probePath = ProcessInfo.processInfo.environment["SPINDLE_REPLAY_PROBE"] {
+            _ = probePath
+            TimecodeDecoder.probe = { d, pitch, jump, cycle, offset in
+                guard d === deck.decoders[deck.active] else { return }
+                probeRows += String(format: "%.5f,%d,%.3f,%.3f,%d,%d\n", probeT, deck.active, pitch, jump, cycle, offset)
+            }
+        }
+        var at = 0
+        while at + block <= total {
+            probeT = Double(at) / rate
+            let t = Double(at) / rate
+            if let next = pending.first, t >= next { pending.removeFirst(); _ = deck.exchangeTrack(makeTrack()) }
+            deck.decode(left: ch[0] + at, right: ch[1] + at, frames: block)
+            deck.render(left: outL, right: outR, frames: block, mix: false)
+            let x = deck.telemetry.pointee
+            rows += String(format: "%.4f,%.3f,%.3f,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.4f,%d,%d,%d\n",
+                           t, deck.inputLevel, x.signal, x.hasPosition ? 1 : 0, x.validBits, x.activeConfig,
+                           x.hasPosition ? x.positionIndex : -1, x.onRecord, x.pitch, x.played, x.playhead,
+                           x.leadIn ? 1 : 0, x.absolute ? 1 : 0, x.jumps)
+            at += block
+        }
+        try? rows.write(toFile: out, atomically: true, encoding: .utf8)
+        if let probePath = ProcessInfo.processInfo.environment["SPINDLE_REPLAY_PROBE"] {
+            TimecodeDecoder.probe = nil
+            try? probeRows.write(toFile: probePath, atomically: true, encoding: .utf8)
+        }
+        outL.deallocate(); outR.deallocate()
+        for t in tracks { t.pointee.free(); t.deallocate() }
+        return String(format: "Replay %@: %.1f s, %d jumps → %@", (path as NSString).lastPathComponent,
+                      Double(total) / rate, deck.jumpCount, out)
+    }
+
     static func loopTest() -> String {
         let rate = 48000.0, frames = Int(rate * 30), beat = 60.0 / 128
         let l = UnsafeMutablePointer<Float>.allocate(capacity: frames)

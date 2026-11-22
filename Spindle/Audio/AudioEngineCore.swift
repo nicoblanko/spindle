@@ -70,6 +70,9 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
 
     /// What the session recorder hears.
     let recordTap = RecordTap()
+    /// Raw timecode input per deck, for SPINDLE_CAPTURE (diagnostics: the
+    /// real record's signal, replayed offline with SPINDLE_REPLAY).
+    let captureTaps = [RecordTap(), RecordTap()]
     /// First input channel of the pair to record (the mixer's record/master
     /// send), or −1 for Spindle's own output of both decks.
     var recordInput = -1
@@ -232,6 +235,7 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
                 left = first < inputChannels ? inputData[first] : silence
                 right = first + 1 < inputChannels ? inputData[first + 1] : silence
             }
+            captureTaps[index].push(left: left, right: right, frames: frames)
             deck.decode(left: left, right: right, frames: frames)
         }
 

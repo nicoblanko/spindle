@@ -179,13 +179,87 @@ nonisolated final class TimecodeDecoder {
         } else {
             angleRate += (signedStep - angleRate) * angleAlpha
         }
-        pitch = angleRate * sampleRate / (2 * .pi * definition.resolution)
+        let anglePitch = angleRate * sampleRate / (2 * .pi * definition.resolution)
+        pitch = fastPitch(anglePitch, step: signedStep, p: p, s: s)
 
         if definition.offsetModulated {
             trackMK2(raw: rawSum, step: signedStep)
         } else {
             trackMK1(p: p, s: s)
         }
+    }
+
+    // MARK: Fast spins
+
+    // Measured on a real MK2 record (Technics, Xone:24C): up to ~3× the two
+    // channels are 90° apart, but above that (carrier over ~7.7 kHz) they
+    // drift towards 0°, and the direction read from the rotation flips every
+    // few milliseconds: the stutter on a backspin. So the rotation is only
+    // trusted while it is coherent (the vector turning steadily one way).
+    // When it isn't, the speed comes from how often the signal crosses zero
+    // and the direction stays as it was: a record can't turn round without
+    // slowing down, and at low speed the rotation is clean again.
+
+    /// One channel's zero crossings: the samples between them (2 per
+    /// carrier cycle), smoothed. Its timing doesn't depend on the phase.
+    private struct Crossings {
+        var positive = false
+        var since = 0.0
+        var interval = 1e9
+        /// Smoothed over ~2 crossings only: follows a quick turn.
+        var recent = 1e9
+
+        @inline(__always)
+        mutating func add(_ x: Float, threshold: Float) {
+            since += 1
+            if positive ? (x < -threshold) : (x > threshold) {
+                positive.toggle()
+                interval += (min(since, 1e4) - interval) * 0.15
+                recent += (min(since, 1e4) - recent) * 0.5
+                since = 0
+            }
+        }
+    }
+    private var crossP = Crossings(), crossS = Crossings()
+    private var meanStep = 0.0, meanAbsStep = 0.0
+    private var heldForwards = true
+    /// Samples the record has been slow enough for its direction to change.
+    private var slowSamples = 0
+    /// Below this the rotation is clean and the direction may change.
+    static let turnSpeed = 1.5
+    /// How steadily the vector turns one way (1 = perfectly).
+    private(set) var coherence = 0.0
+
+    @inline(__always)
+    private func fastPitch(_ anglePitch: Double, step: Double, p: Float, s: Float) -> Double {
+        let a = 1 / (0.001 * sampleRate)
+        meanStep += (step - meanStep) * a
+        meanAbsStep += (abs(step) - meanAbsStep) * a
+        coherence = meanAbsStep > 1e-9 ? abs(meanStep) / meanAbsStep : 0
+        let threshold = max(envelope * 0.2, 0.002)
+        crossP.add(p, threshold: threshold)
+        crossS.add(s, threshold: threshold)
+        if envelope < 0.002 { crossP = Crossings(); crossS = Crossings(); heldForwards = true }
+        // Slow, judged from crossings that happened (a needle bouncing on a
+        // spin gives a moment with none, which isn't slowing down). Real
+        // turns spend 35–120 ms below 1.5×; 2 ms is enough to be sure.
+        let recentSpeed = sampleRate / (2 * min(crossP.recent, crossS.recent) * definition.resolution)
+        slowSamples = recentSpeed < Self.turnSpeed ? slowSamples + 1 : 0
+        let mayTurn = slowSamples > Int(0.002 * sampleRate)
+        // The direction of the last millisecond (the speed itself is
+        // smoothed over 4 ms and would still show the old one).
+        let turning = meanStep > 0
+        if mayTurn && coherence > 0.85 { heldForwards = turning }
+        if envelope < 0.002 || (coherence > 0.85 && turning == heldForwards && (anglePitch > 0) == heldForwards) {
+            return anglePitch
+        }
+        // Either channel can fade for a few ms on a fast spin: the one still
+        // crossing steadily tells the speed. A long silence means slowing.
+        var samples = min(crossP.interval, crossS.interval)
+        let quiet = min(crossP.since, crossS.since)
+        if quiet > 0.01 * sampleRate { samples = max(samples, quiet) }
+        let speed = sampleRate / (2 * max(samples, 1) * definition.resolution)
+        return heldForwards ? speed : -speed
     }
 
     // MARK: MK1
@@ -223,7 +297,7 @@ nonisolated final class TimecodeDecoder {
 
     @inline(__always)
     private func removeOffset(_ p: inout Float, _ s: inout Float) {
-        let corner = min(max(0.35 * abs(pitch) * definition.resolution, 200), 900)
+        let corner = min(max(0.35 * abs(pitch) * definition.resolution, 200), 4000)
         let a = Float(exp(-2 * Double.pi * corner / sampleRate))
         hpP = a * (hpP + p - lastP)
         hpS = a * (hpS + s - lastS)
@@ -256,8 +330,17 @@ nonisolated final class TimecodeDecoder {
     @inline(__always)
     private func mod5(_ x: Int) -> Int { ((x % 5) + 5) % 5 }
 
+    /// Diagnostics (replay only): called for every finished MK2 cycle with
+    /// (pitch, jump ÷ envelope, cycle within the frame, frame offset).
+    nonisolated(unsafe) static var probe: ((TimecodeDecoder, Double, Double, Int, Int) -> Void)?
+
     private func finishCycle(_ cycle: Int, mean: Double, forward: Bool) {
         forwards = forward
+        if let probe = Self.probe, hasPreviousMean {
+            let cycleSeconds = 1 / (max(abs(pitch), 0.05) * definition.resolution)
+            let jump = mean - previousMean * exp(-cycleSeconds / 0.0017)
+            probe(self, pitch, jump / Double(max(envelope, 1e-6)), mod5(cycle), frameOffset)
+        }
         if hasPreviousMean {
             // The phono stage's AC coupling makes every offset decay (time
             // constant ~1.7 ms). Predict that decay so only real edges stand out.
