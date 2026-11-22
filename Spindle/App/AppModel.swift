@@ -439,6 +439,59 @@ final class AppModel {
 
     /// Once a deck locks, remember which decoder variant did it, so the next
     /// start has the right direction straight away.
+    // MARK: Record survey
+
+    /// SPINDLE_SURVEY=1: while a record plays from start to finish, log where
+    /// the needle is, how well it reads and how often the lock goes, every
+    /// 5 s, and a summary when the record stops (the needle reached the end).
+    @ObservationIgnored let survey = ProcessInfo.processInfo.environment["SPINDLE_SURVEY"] != nil
+    private struct Survey {
+        var firstIndex: Int?, lastIndex: Int?
+        var lastLog = Date.distantPast
+        var losses: Int32 = 0, lossesAtLog: Int32 = 0
+        var signals: [Float] = []
+        var notReading = 0
+    }
+    @ObservationIgnored private var surveys: [Int: Survey] = [:]
+
+    private func surveyStep(deck: DeckModel, t: DeckTelemetry, def: TimecodeDefinition) {
+        var sv = surveys[deck.id] ?? Survey()
+        let reading = t.lockHeld && t.positionIndex >= 0 && t.pitch > 0.5
+        if reading {
+            sv.notReading = 0
+            if sv.firstIndex == nil { sv.firstIndex = t.positionIndex }
+            sv.lastIndex = t.positionIndex
+            sv.signals.append(t.signal)
+            sv.losses = t.lostLockEvents
+            if Date().timeIntervalSince(sv.lastLog) >= 5 {
+                let since = sv.losses &- sv.lossesAtLog
+                spindleLog.notice(String(format: "Survey %@: record %.1f s from its start (index %d), signal %.3f, speed %.3f, lock lost %d× in the last 5 s",
+                                         deck.label, Self.recordSeconds(t, def), t.positionIndex, t.signal, t.pitch, Int(since)))
+                sv.lastLog = Date()
+                sv.lossesAtLog = sv.losses
+            }
+        } else if let first = sv.firstIndex, let last = sv.lastIndex {
+            sv.notReading += 1
+            if sv.notReading == 5 {                       // 5 s without the record
+                let length = Double(Self.folded(last - first, def)) / def.bitRate
+                let avg = sv.signals.isEmpty ? 0 : sv.signals.reduce(0, +) / Float(sv.signals.count)
+                spindleLog.notice(String(format: "Survey %@ done: first groove index %d, last %d, %.1f s of record (%.1f min), average signal %.3f, %d lock losses",
+                                         deck.label, first, last, length, length / 60, avg, Int(sv.losses)))
+                sv = Survey()
+            }
+        }
+        surveys[deck.id] = sv
+    }
+
+    nonisolated static func folded(_ bits: Int, _ def: TimecodeDefinition) -> Int {
+        let period = def.positionModulus
+        guard period > 0 else { return bits }
+        var b = bits % period
+        if b > period / 2 { b -= period }
+        if b < -period / 2 { b += period }
+        return b
+    }
+
     /// Seconds from the record's learned start to the needle (folded as the
     /// decoder does).
     nonisolated static func recordSeconds(_ t: DeckTelemetry, _ def: TimecodeDefinition) -> Double {
@@ -461,6 +514,7 @@ final class AppModel {
                     if t.hasPosition, deck.preferredConfig(for: def) != Int(t.activeConfig) {
                         deck.setPreferredConfig(Int(t.activeConfig), for: def)
                     }
+                    if self.survey { self.surveyStep(deck: deck, t: t, def: core.decks[deck.id].definition) }
                     // Where the track is against the record: log jumps (and the
                     // first second after a load), to see needle drops at work.
                     let last = self.lastPlayhead[deck.id]
