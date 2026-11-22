@@ -147,6 +147,7 @@ final class AppModel {
     /// Lock losses already logged, per deck.
     @ObservationIgnored private var lossSeen: [Int: Int32] = [:]
     @ObservationIgnored private var readingSeen: [Int: Bool] = [:]
+    @ObservationIgnored private var sideSeen: [Int: Int] = [:]
     @ObservationIgnored private var lastPlayhead: [Int: Double] = [:]
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
     var routing = EngineRouting()
@@ -364,8 +365,9 @@ final class AppModel {
         for deck in decks {
             core.decks[deck.id].absoluteMode = deck.absoluteMode
             if let config = deck.preferredConfig(for: deck.vinyl) { core.decks[deck.id].prefer(config: config) }
-            core.decks[deck.id].startIndex = deck.startIndex(for: deck.vinyl) ?? 0
-            core.decks[deck.id].startKnown = deck.startIndex(for: deck.vinyl) != nil
+            // The side is found from the timecode (known side starts).
+            core.decks[deck.id].startIndex = deck.vinyl.sideStarts[0]
+            core.decks[deck.id].startKnown = false
             core.decks[deck.id].toneFrequency = deck.id == 0 ? 440 : 660
             core.decks[deck.id].testTone = deck.testTone
             for kind in FXKind.allCases { core.decks[deck.id].setFX(kind, deck.fx[kind]) }
@@ -540,10 +542,11 @@ final class AppModel {
                         spindleLog.notice(String(format: "Deck %@: lock lost while playing, level %.0f%% of before, %@",
                                                  deck.label, t.lastLossRatio * 100, t.lastLossCoasting ? "carried on" : "followed the signal"))
                     }
-                    // The record's start, once the deck has learned it.
-                    if t.recordStart >= 0, deck.startIndex(for: def) != t.recordStart {
-                        deck.setStartIndex(t.recordStart, for: def)
-                        spindleLog.notice("Deck \(deck.label): record start learned")
+                    // Which side of the record is on (log each change).
+                    if t.recordStart >= 0, self.sideSeen[deck.id] != t.recordStart {
+                        self.sideSeen[deck.id] = t.recordStart
+                        let side = (def.sideStarts.firstIndex(of: t.recordStart) ?? 0) + 1
+                        spindleLog.notice("Deck \(deck.label): record side \(side) of \(def.sideStarts.count)")
                     }
                 }
                 try? await Task.sleep(for: .seconds(1))

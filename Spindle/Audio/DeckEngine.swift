@@ -29,7 +29,7 @@ nonisolated struct DeckTelemetry {
     /// The needle left the record while the track was playing, and the deck
     /// carries on at the last speed until the needle is back.
     var coasting = false
-    /// The record's start in the timecode sequence, once learned (else -1).
+    /// The start of the record side the needle is on (else -1).
     var recordStart = -1
     var lostLockEvents: Int32 = 0
     var lastLossRatio: Float = 0
@@ -65,7 +65,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// Position index (in the format's bit sequence) of the record's start,
     /// calibrated per deck. Set from the UI.
     var startIndex = 0
-    /// Whether `startIndex` is the record's real start (learned or saved).
+    /// Whether `startIndex` is the start of the side the needle is on.
     /// Then the record maps straight onto the track, as in Traktor: needle
     /// at the start of the record = start of the track.
     var startKnown = false
@@ -326,7 +326,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             target = transportPlaying ? tempo : 0
         } else {
             target = followSpeed(decoder, frames: frames)
-            learnStart(decoder)
+            findSide(decoder)
             if anchorPending && decoder.hasPosition && !coasting {
                 // Tie the track to the record where it is now.
                 trackOffset = decoder.positionSeconds(startIndex: startIndex) - playhead
@@ -663,24 +663,21 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         return pitch
     }
 
-    /// The record's start is the earliest groove that has played steadily
-    /// (a confirmed lock, forwards at about normal speed). Playing from an
-    /// earlier groove moves it there. The first time it's learned, the track
-    /// starts at that groove.
-    private func learnStart(_ decoder: TimecodeDecoder) {
-        guard absoluteMode, decoder.hasPosition, !coasting, decoder.validBits >= confirmBits,
-              decoder.pitch > 0.6, decoder.pitch < 1.4 else { return }
-        let here = decoder.positionSeconds(startIndex: startIndex)
-        guard !startKnown || here < -0.5 else { return }
-        // Where the record starts: here, less how far into the run of
-        // confirmed bits we already are, so the start is the landing groove.
-        startIndex = decoder.positionIndex - decoder.validBits
+    /// Counts the record from the outer edge of the side the needle is on
+    /// (known per vinyl format). Switching sides keeps the track where it is;
+    /// the next load maps it from the new side's edge.
+    private func findSide(_ decoder: TimecodeDecoder) {
+        guard decoder.hasPosition, decoder.validBits >= confirmBits else { return }
+        let period = definition.positionModulus
+        let index = period > 0 ? ((decoder.positionIndex % period) + period) % period : decoder.positionIndex
+        let side = definition.sideStarts.last { $0 <= index } ?? definition.sideStarts[0]
+        guard !startKnown || side != startIndex else { return }
+        if startKnown {
+            // Keep the track's position: shift the offset by the change.
+            trackOffset -= Double(side - startIndex) / definition.bitRate
+        }
+        startIndex = side
         startKnown = true
-        trackOffset = 0
-        anchorPending = false
-        let since = decoder.positionSeconds(startIndex: startIndex)
-        if abs(playhead - since) > 0.15 { startFade(from: playhead) }
-        playhead = since
     }
 
     @inline(__always)
@@ -736,7 +733,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     ///  · drops: needle up 0.5 s / 2.5 s, down 90 s further on; track minus
     ///    record every half second after landing (0 = following)
     ///  · slide: how far the track strays in the 0.4 s after the lift
-    ///  · mix in: start learned at the first groove played (60 s), a new
+    ///  · mix in: side 1 found at the first groove played (60 s), a new
     ///    track loaded with the needle at 200 s, needle moved back to 60 s;
     ///    the playhead every half second after landing (should be ~0.5, 1…)
     static func needleTest() -> String {
@@ -822,7 +819,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             let atLoad = deck.telemetry.pointee.playhead
             sim.lifted = true
             play(deck, sim, &t, until: 8)                 // tonearm moved by hand
-            sim.seek(seconds: 60)
+            sim.seek(seconds: 16.2)                       // the side's outer edge
             sim.lifted = false
             var marks: [String] = []
             var next = t + 0.1
@@ -933,7 +930,25 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             return "5-min track loaded 8 min into the record: " + marks.joined(separator: " ")
         }
 
-        return "Needle test · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
+        /// The second MK2 side: needle on its outer edge (~921 s into the
+        /// sequence) with a track loaded: the track plays from its top.
+        func sideTwo() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let track = makeTrack()
+            _ = deck.exchangeTrack(track)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 921.5)
+            sim.targetPitch = 1
+            var t = 0.0
+            var marks: [String] = []
+            var next = 0.5
+            play(deck, sim, &t, until: 2.01) { now in
+                if now >= next { marks.append(String(format: "%.2f", deck.telemetry.pointee.playhead)); next += 0.5 }
+            }
+            track.pointee.free(); track.deallocate()
+            return "side 2, needle at its edge: " + marks.joined(separator: " ")
+        }
+
+        return "Needle test · " + sideTwo() + " · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while

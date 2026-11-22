@@ -40,6 +40,10 @@ nonisolated struct TimecodeDefinition: Sendable, Hashable, Identifiable {
     var offsetModulated = false
     /// Carrier cycles per bit: 1 for MK1, 5 for MK2.
     var cyclesPerBit = 1
+    /// Where each side's outer edge sits in the position sequence (bits,
+    /// folded by `positionModulus`). The record's own position is counted
+    /// from the side the needle is on: no learning needed.
+    var sideStarts: [Int] = [0]
 
     /// Whether Spindle can read absolute position from this format.
     var decodesPosition: Bool { length > 0 }
@@ -58,7 +62,11 @@ nonisolated struct TimecodeDefinition: Sendable, Hashable, Identifiable {
     static let traktorMK2 = TimecodeDefinition(
         id: "traktor_mk2", name: "Traktor MK2 (both sides)",
         resolution: 2500, bits: 22, seed: 1, taps: 0x4180, length: 4_194_303,
-        offsetModulated: true, cyclesPerBit: 5)
+        offsetModulated: true, cyclesPerBit: 5,
+        // Measured on the user's records (a full play of one side, and the
+        // start read on the other): one side spans ~16 s…~905 s of the
+        // sequence, the other ~921 s…~1810 s.
+        sideStarts: [8_077, 460_639])
 
     static let traktorA = TimecodeDefinition(
         id: "traktor_a", name: "Traktor MK1, first edition · side A",
