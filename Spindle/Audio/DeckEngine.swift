@@ -666,6 +666,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private var lastPitch = 0.0
     private var lastDelta = 0.0
     private var garbage = 0
+    private var needleOff = false
     /// How long a scraping, jumping reading is bridged with the last good
     /// speed before the deck stops.
     private var holdSamples: Int { Int(0.15 * sampleRate) }
@@ -695,13 +696,20 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             return pitch
         }
         sinceGood += frames
-        if decoder.hasPosition { return pitch }
-        garbage = jumpy ? garbage + frames : max(0, garbage - frames)
-        if garbage > 0 {
-            if sinceGood < holdSamples { return goodPitch }       // bridge the scrape
-            for d in decoders { d.dropLock() }                    // needle off: stop
+        // Needle off: almost no signal. Stop, and clear the decoders' lock
+        // once, so the old position can't carry over to where it lands.
+        if inputLevel < 0.02 {
+            if !needleOff { for d in decoders { d.dropLock() } }
+            needleOff = true
             return 0
         }
+        needleOff = false
+        if decoder.hasPosition { return pitch }
+        garbage = jumpy ? garbage + frames : max(0, garbage - frames)
+        // A zig-zag reading (the stylus scraping as it lifts) is bridged with
+        // the last good speed for a moment; after that the record is followed
+        // again: a hand spinning it reads rough too, and must not be stopped.
+        if garbage > 0 && sinceGood < holdSamples { return goodPitch }
         return pitch
     }
 
@@ -1012,7 +1020,28 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             return "side 2, needle 8.3 s before its first groove, each second: " + marks.joined(separator: " ")
         }
 
-        return "Needle test · " + sideTwo() + " · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
+        /// A rough 3× spin for 2 s (zig-zag readings, strong signal): the
+        /// track should keep moving with the record, not stop.
+        func roughSpin() -> String {
+            let deck = DeckEngine(definition: def, sampleRate: rate)
+            let track = makeTrack()
+            _ = deck.exchangeTrack(track)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 120)
+            sim.targetPitch = 1
+            var t = 0.0
+            play(deck, sim, &t, until: 3)
+            let p0 = deck.telemetry.pointee.playhead, n0 = needle(sim)
+            sim.inertia = 0.02
+            sim.targetPitch = 3
+            sim.roughness = 0.4
+            var stopped = 0
+            play(deck, sim, &t, until: 5) { _ in if abs(deck.telemetry.pointee.pitch) < 0.2 { stopped += 1 } }
+            let moved = deck.telemetry.pointee.playhead - p0, record = needle(sim) - n0
+            track.pointee.free(); track.deallocate()
+            return String(format: "rough 3× spin: track moved %.2f s with the record's %.2f s, stopped %.2f s of 2", moved, record, Double(stopped * block) / rate)
+        }
+
+        return "Needle test · " + roughSpin() + " · " + sideTwo() + " · " + lateLoad() + " · " + formats() + " · " + spin() + " · " + drop(up: 0.5) + " · " + drop(up: 2.5) + " · mix in: " + mixIn() + " · " + handStop()
     }
 
     /// Self-test: a click on every beat at 128 BPM; loop 4 beats while

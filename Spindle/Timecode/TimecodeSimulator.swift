@@ -40,6 +40,9 @@ nonisolated final class TimecodeSimulator {
     /// A real lift isn't a clean cut: for ~30 ms the stylus scrapes out of
     /// the groove, the carrier fades and its phase wanders.
     var realisticLift = false
+    /// Phase noise at full level: a hand spinning the record roughly (the
+    /// reading zig-zags, but the needle stays in the groove).
+    var roughness = 0.0
     private var liftSamples = 0
     private var wobble = 0.0
     private var noise: UInt32 = 0x12345
@@ -115,6 +118,10 @@ nonisolated final class TimecodeSimulator {
                 fade = max(0, 1 - Float(max(0, Double(liftSamples) - scrape)) / Float(0.03 * sampleRate))
                 noise = noise &* 1664525 &+ 1013904223
                 wobble += (Double(noise >> 8) / Double(1 << 24) - 0.5) * 1.2
+            }
+            if roughness > 0 && !lifted {
+                noise = noise &* 1664525 &+ 1013904223
+                wobble = (Double(noise >> 8) / Double(1 << 24) - 0.5) * roughness
             }
             if lifted && fade <= 0 {
                 noise = noise &* 1664525 &+ 1013904223
