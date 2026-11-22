@@ -105,10 +105,13 @@ nonisolated final class TimecodeSimulator {
             var l: Float, r: Float
             var fade: Float = 1
             if lifted && realisticLift {
+                // As on the user's records: the stylus scrapes for ~100 ms at
+                // full level (the decoder loses lock first), then fades.
                 liftSamples += 1
-                fade = max(0, 1 - Float(liftSamples) / Float(0.03 * sampleRate))
+                let scrape = 0.1 * sampleRate
+                fade = max(0, 1 - Float(max(0, Double(liftSamples) - scrape)) / Float(0.03 * sampleRate))
                 noise = noise &* 1664525 &+ 1013904223
-                wobble += (Double(noise >> 8) / Double(1 << 24) - 0.5) * 0.6
+                wobble += (Double(noise >> 8) / Double(1 << 24) - 0.5) * 1.2
             }
             if lifted && fade <= 0 {
                 noise = noise &* 1664525 &+ 1013904223

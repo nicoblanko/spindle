@@ -321,10 +321,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         if internalMode {
             target = transportPlaying ? tempo : 0
         } else {
-            updateCoasting(decoder: decoder, frames: frames)
-            if coasting {
-                target = coastPitch
-            }
+            target = followSpeed(decoder, frames: frames)
             learnStart(decoder)
             if anchorPending && decoder.hasPosition && !coasting {
                 // Tie the track to the record where it is now.
@@ -598,6 +595,46 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         historyWrite = (historyWrite + 1) % count
     }
 
+    // MARK: Speed from the record
+
+    /// The last moment the record read cleanly (confirmed lock).
+    private var goodPitch = 0.0
+    private var sinceGood = Int.max / 2
+    private var lastPitch = 0.0
+    private var garbage = 0
+    /// How long a scraping, jumping reading is bridged with the last good
+    /// speed before the deck stops.
+    private var holdSamples: Int { Int(0.15 * sampleRate) }
+
+    /// Needle on the record: the track follows it. Needle off: it stops.
+    /// When the reading turns to noise (the stylus scraping on a lift or a
+    /// skip, a speed that jumps from buffer to buffer), the last good speed
+    /// is held for a moment instead, so the music doesn't slide; if the
+    /// noise goes on, the deck stops and forgets the old position. A lock
+    /// lost while the speed still reads smoothly (dust, a worn groove) just
+    /// follows the speed.
+    private func followSpeed(_ decoder: TimecodeDecoder, frames: Int) -> Double {
+        coasting = false
+        let pitch = decoder.pitch
+        let jumpy = abs(pitch - lastPitch) > 0.15
+        lastPitch = pitch
+        if decoder.hasPosition && decoder.validBits >= confirmBits {
+            goodPitch = pitch
+            sinceGood = 0
+            garbage = 0
+            return pitch
+        }
+        sinceGood += frames
+        if decoder.hasPosition { return pitch }
+        garbage = jumpy ? garbage + frames : max(0, garbage - frames)
+        if garbage > 0 {
+            if sinceGood < holdSamples { return goodPitch }       // bridge the scrape
+            for d in decoders { d.dropLock() }                    // needle off: stop
+            return 0
+        }
+        return pitch
+    }
+
     /// The record's start is the earliest groove that has played steadily
     /// (a confirmed lock, forwards at about normal speed). Playing from an
     /// earlier groove moves it there. The first time it's learned, the track
@@ -714,10 +751,15 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             let liftPlay = deck.telemetry.pointee.playhead, liftT = t
             var slide = 0.0
             sim.lifted = true
-            play(deck, sim, &t, until: 4 + min(up, 0.4)) { now in
+            // The scrape (first 0.1 s): the track should go on evenly.
+            play(deck, sim, &t, until: 4.1) { now in
                 slide = max(slide, abs(deck.telemetry.pointee.playhead - (liftPlay + (now - liftT))))
             }
+            // Needle off: the track should stand still.
+            play(deck, sim, &t, until: 4.4)
+            let off = deck.telemetry.pointee.playhead
             play(deck, sim, &t, until: 4 + up)
+            let movedOff = deck.telemetry.pointee.playhead - off
             sim.seek(seconds: needle(sim) + 90)
             sim.lifted = false
             var marks: [String] = []
@@ -729,7 +771,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 }
             }
             track.pointee.free(); track.deallocate()
-            return String(format: "up %.1f s: slide %.3f s, then ", up, slide) + marks.joined(separator: " ")
+            return String(format: "up %.1f s: slide %.3f s, moved %.3f s with the needle off, then ", up, slide, movedOff) + marks.joined(separator: " ")
         }
 
         func mixIn() -> String {
