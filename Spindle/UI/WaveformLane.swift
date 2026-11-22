@@ -42,9 +42,9 @@ struct WaveformLane: View {
                     if let track = deck.track, let t = telemetry?.pointee {
                         if t.playhead > track.duration {
                             notice("Needle is past the end of this track (\(DeckPanel.clock(t.playhead))). Move it towards the start of the record.")
-                        } else if t.playhead < 0 {
-                            notice("Needle is before the start of this track.")
                         }
+                        // Before the start (the lead-in) needs no notice: the
+                        // clock counts up to 0 and the track starts there.
                     }
                 }
             }
