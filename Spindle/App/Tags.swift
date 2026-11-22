@@ -76,14 +76,15 @@ final class TagStore {
 
     /// Airtable's light option colours: blue, cyan, teal, green, yellow,
     /// orange, red, pink, purple, grey.
+    /// Label colours: real colour (exact), unlike the black-and-white theme.
     static var palette: [Color] { [
-        Color(hex: 0xcfdfff), Color(hex: 0xd0f0fd), Color(hex: 0xc2f5e9), Color(hex: 0xd1f7c4),
-        Color(hex: 0xffeab6), Color(hex: 0xfee2d5), Color(hex: 0xffdce5), Color(hex: 0xffdaf6),
-        Color(hex: 0xede2fe), Color(hex: 0xe5e9f0),
+        Color(hex: 0xcfdfff, exact: true), Color(hex: 0xd0f0fd, exact: true), Color(hex: 0xc2f5e9, exact: true), Color(hex: 0xd1f7c4, exact: true),
+        Color(hex: 0xffeab6, exact: true), Color(hex: 0xfee2d5, exact: true), Color(hex: 0xffdce5, exact: true), Color(hex: 0xffdaf6, exact: true),
+        Color(hex: 0xede2fe, exact: true), Color(hex: 0xe5e9f0, exact: true),
         // Stronger versions, which stand out on the dark screen.
-        Color(hex: 0x8fb4ff), Color(hex: 0x7fd3f0), Color(hex: 0x6fdcc0), Color(hex: 0x9fe07f),
-        Color(hex: 0xffd264), Color(hex: 0xffab78), Color(hex: 0xff8f8f), Color(hex: 0xff9fcf),
-        Color(hex: 0xc4a2ff), Color(hex: 0xb4bccb),
+        Color(hex: 0x8fb4ff, exact: true), Color(hex: 0x7fd3f0, exact: true), Color(hex: 0x6fdcc0, exact: true), Color(hex: 0x9fe07f, exact: true),
+        Color(hex: 0xffd264, exact: true), Color(hex: 0xffab78, exact: true), Color(hex: 0xff8f8f, exact: true), Color(hex: 0xff9fcf, exact: true),
+        Color(hex: 0xc4a2ff, exact: true), Color(hex: 0xb4bccb, exact: true),
     ] }
     static let paletteNames = ["Blue", "Cyan", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Grey",
                                "Strong blue", "Strong cyan", "Strong teal", "Strong green", "Strong yellow",

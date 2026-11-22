@@ -987,7 +987,8 @@ struct CrateList: View {
             } else {
                 Spacer().frame(width: 10)
             }
-            Image(systemName: children > 0 ? "folder" : "metronome").font(.system(size: 10)).frame(width: 14)
+            Image(systemName: children > 0 ? "folder.fill" : "metronome.fill").font(.system(size: 10)).frame(width: 14)
+                .foregroundStyle(tag.color)
             Text(tag.name).font(Theme.body).lineLimit(1)
             if let rule = tag.rule, rule.minEnergy > 1 || rule.maxEnergy < 10 || rule.minor != nil {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 9)).foregroundStyle(Theme.inkFaint)

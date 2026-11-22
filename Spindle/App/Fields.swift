@@ -403,13 +403,13 @@ struct RecordContext {
             } }
         case .mood:
             let c = OptionColors.shared
-            return [OptionInfo(id: "A", name: "Dark", color: c.color("mood", "A", default: Color(hex: 0xc9c2e8))),
-                    OptionInfo(id: "B", name: "Bright", color: c.color("mood", "B", default: Color(hex: 0xffeab6)))]
+            return [OptionInfo(id: "A", name: "Dark", color: c.color("mood", "A", default: Color(hex: 0xc9c2e8, exact: true))),
+                    OptionInfo(id: "B", name: "Bright", color: c.color("mood", "B", default: Color(hex: 0xffeab6, exact: true)))]
         case .intro, .outro:
             let key = ref == .intro ? "intro" : "outro"
             return SectionType.allCases.map {
                 OptionInfo(id: $0.rawValue, name: $0.rawValue,
-                           color: OptionColors.shared.color(key, $0.rawValue, default: Color(hex: 0xe5e9f0)))
+                           color: OptionColors.shared.color(key, $0.rawValue, default: Color(hex: 0xe5e9f0, exact: true)))
             }
         case .tempoGroup:
             return tags.tempoGroups.map { OptionInfo(id: $0.id.uuidString, name: $0.name, color: $0.color) }
