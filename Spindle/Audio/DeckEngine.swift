@@ -31,6 +31,8 @@ nonisolated struct DeckTelemetry {
     var coasting = false
     /// The start of the record side the needle is on (else -1).
     var recordStart = -1
+    var jumps: Int32 = 0
+    var lastJump: Double = 0
     var lostLockEvents: Int32 = 0
     var lastLossRatio: Float = 0
     var lastLossCoasting = false
@@ -107,6 +109,13 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     private var anchorPending = false
     /// The needle is in the lead-in: the track holds at its start.
     private var leadIn = false
+    /// Samples since the needle came down (the signal was gone, now locked)
+    /// or a track was loaded; jumps are allowed for the first second.
+    private var sinceLanding = 0
+    private var quietSamples = 0
+    /// Diagnostics: jumps made, and the size of the last one.
+    private var jumpCount = 0
+    private var lastJump = 0.0
     private var samplesSinceLock = Int.max / 2
 
     var toneFrequency: Double = 440
@@ -305,6 +314,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         var target = decoder.pitch
         if cueRequest {
             cueRequest = false
+            sinceLanding = 0
             playhead = 0
             coasting = false          // a new track waits for the needle
             if absoluteMode && startKnown {
@@ -328,6 +338,11 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             target = transportPlaying ? tempo : 0
         } else {
             target = followSpeed(decoder, frames: frames)
+            // Needle off = almost no signal (a spinning record still gives
+            // plenty). After 0.1 s of that, the next lock is a landing.
+            if inputLevel < 0.02 { quietSamples += frames } else if decoder.hasPosition { quietSamples = 0 }
+            if quietSamples > Int(0.1 * sampleRate) { sinceLanding = 0 }
+            else if decoder.hasPosition && decoder.validBits >= confirmBits { sinceLanding += frames }
             findSide(decoder)
             if anchorPending && decoder.hasPosition && !coasting {
                 // Tie the track to the record where it is now.
@@ -359,9 +374,18 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                 // a confirmed reading more than half a second away; smaller
                 // differences are taken up gently, at most 3% speed, which
                 // you don't hear.
-                if abs(error) > 0.5 {
+                // Jumps only where they belong: just after the needle came
+                // down (or a track was loaded), or for a gap no spin can make.
+                // While a hand moves the record, differences are taken up
+                // smoothly instead (Mixxx doesn't resync while scratching
+                // either): each jump is a little crossfade, and a run of them
+                // stutters.
+                let mayJump = sinceLanding < Int(sampleRate) || abs(error) > 5
+                if abs(error) > 0.5 && mayJump {
                     if decoder.validBits >= confirmBits {
                         startFade(from: playhead)
+                        jumpCount &+= 1
+                        lastJump = position - playhead
                         if position > length - 1 || position < -2 {
                             // The needle is past the end of the track (or well
                             // before its start): the track starts at this groove,
@@ -374,7 +398,10 @@ nonisolated final class DeckEngine: @unchecked Sendable {
                         }
                     }
                 } else {
-                    target += min(max(error * 2, -0.03), 0.03)
+                    // Inaudible at normal speed (3%); more room the faster the
+                    // record moves.
+                    let room = 0.03 + 0.15 * abs(decoder.pitch)
+                    target += min(max(error * 2, -room), room)
                 }
             }
 
@@ -549,6 +576,8 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             validBits: Int32(decoder.validBits),
             coasting: coasting,
             recordStart: startKnown ? startIndex : -1,
+            jumps: Int32(truncatingIfNeeded: jumpCount),
+            lastJump: lastJump,
             lostLockEvents: Int32(truncatingIfNeeded: lostLockEvents),
             lastLossRatio: lastLossRatio,
             lastLossCoasting: lastLossCoasting,
@@ -900,10 +929,15 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             func gap() -> Double { deck.telemetry.pointee.playhead - (needle(sim) - offset) }
             var trace: [String] = []
             var nextTrace = t
+            var jumps = 0
+            var lastPlay = deck.telemetry.pointee.playhead
             for (speed, until) in [(4.0, 3.5), (-4.0, 4.0), (6.0, 4.3), (-6.0, 4.6), (2.0, 4.8), (-3.0, 5.0), (1.0, 6.5)] {
                 sim.targetPitch = speed
                 play(deck, sim, &t, until: until) { now in
                     worst = max(worst, abs(gap()))
+                    let p = deck.telemetry.pointee.playhead
+                    if abs(p - lastPlay) > 0.06 { jumps += 1 }     // more than 6× speed in one block
+                    lastPlay = p
                     if now >= nextTrace && now < 5.2 {
                         let tel = deck.telemetry.pointee
                         trace.append(String(format: "%.1f/%.1f%@ g%.2f", sim.pitch, tel.pitch, tel.hasPosition ? "" : "?", gap()))
@@ -914,7 +948,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             spindleLog.notice("Spin trace (record/read): \(trace.joined(separator: " "))")
             let end = gap()
             track.pointee.free(); track.deallocate()
-            return String(format: "fast spins: largest gap %.2f s, at the end %+.3f s", worst, end)
+            return String(format: "fast spins: largest gap %.2f s, at the end %+.3f s, %d jumps", worst, end, jumps)
         }
 
         /// Every vinyl format: lock onto a simulated record at 60 s and read

@@ -153,11 +153,14 @@ final class SmoothClock {
         let predicted = value + rate * (t - lastFrame)
         lastFrame = t
         let error = measured - predicted
-        if abs(error) > 0.08 {
+        // At speed (a spin) the reports are rougher: more slack before
+        // treating a difference as a jump, so the waveform doesn't twitch.
+        let speed = abs(rate)
+        if abs(error) > 0.08 + 0.06 * speed {
             value = measured                                      // a jump
         } else {
             // Slow pull for the burst noise (a few ms); faster when scrubbing.
-            value = predicted + error * (abs(error) > 0.015 ? 0.3 : 0.06)
+            value = predicted + error * (abs(error) > 0.015 + 0.01 * speed ? 0.3 : 0.06)
         }
         return value
     }

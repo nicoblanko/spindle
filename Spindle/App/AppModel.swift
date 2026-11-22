@@ -148,6 +148,7 @@ final class AppModel {
     @ObservationIgnored private var lossSeen: [Int: Int32] = [:]
     @ObservationIgnored private var readingSeen: [Int: Bool] = [:]
     @ObservationIgnored private var sideSeen: [Int: Int] = [:]
+    @ObservationIgnored private var jumpsSeen: [Int: Int32] = [:]
     @ObservationIgnored private var lastPlayhead: [Int: Double] = [:]
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
     var routing = EngineRouting()
@@ -517,6 +518,13 @@ final class AppModel {
                         deck.setPreferredConfig(Int(t.activeConfig), for: def)
                     }
                     if self.survey { self.surveyStep(deck: deck, t: t, def: core.decks[deck.id].definition) }
+                    // Jumps the deck made in the last second (each a crossfade).
+                    let made = t.jumps &- (self.jumpsSeen[deck.id] ?? t.jumps)
+                    self.jumpsSeen[deck.id] = t.jumps
+                    if made > 0 {
+                        spindleLog.notice(String(format: "Deck %@: %d jump(s) in the last second, last %+.2f s, speed %.2f",
+                                                 deck.label, Int(made), t.lastJump, t.pitch))
+                    }
                     // Where the track is against the record: log jumps (and the
                     // first second after a load), to see needle drops at work.
                     let last = self.lastPlayhead[deck.id]
