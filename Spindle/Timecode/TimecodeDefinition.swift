@@ -56,16 +56,16 @@ nonisolated struct TimecodeDefinition: Sendable, Hashable, Identifiable {
     /// Traktor Scratch MK2. `seed` is only a reference point in the sequence;
     /// the record's own start is calibrated.
     static let traktorMK2 = TimecodeDefinition(
-        id: "traktor_mk2", name: "Traktor Scratch MK2",
+        id: "traktor_mk2", name: "Traktor MK2 (both sides)",
         resolution: 2500, bits: 22, seed: 1, taps: 0x4180, length: 4_194_303,
         offsetModulated: true, cyclesPerBit: 5)
 
     static let traktorA = TimecodeDefinition(
-        id: "traktor_a", name: "Traktor Scratch · side A",
+        id: "traktor_a", name: "Traktor MK1, first edition · side A",
         resolution: 2000, bits: 23, seed: 0x134503, taps: 0x041040, length: 1_500_000)
 
     static let traktorB = TimecodeDefinition(
-        id: "traktor_b", name: "Traktor Scratch · side B",
+        id: "traktor_b", name: "Traktor MK1, first edition · side B",
         resolution: 2000, bits: 23, seed: 0x32066c, taps: 0x041040, length: 2_110_000)
 
     // Serato Control Vinyl (2nd edition) and CD. The code's parameters

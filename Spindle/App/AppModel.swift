@@ -146,6 +146,7 @@ final class AppModel {
     private(set) var running = false
     /// Lock losses already logged, per deck.
     @ObservationIgnored private var lossSeen: [Int: Int32] = [:]
+    @ObservationIgnored private var readingSeen: [Int: Bool] = [:]
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
     var routing = EngineRouting()
     private var routingDeviceID: AudioDeviceID?
@@ -445,6 +446,14 @@ final class AppModel {
                     let def = core.decks[deck.id].definition
                     if t.hasPosition, deck.preferredConfig(for: def) != Int(t.activeConfig) {
                         deck.setPreferredConfig(Int(t.activeConfig), for: def)
+                    }
+                    // Reading the record or not: log each change, with the level.
+                    let reading = t.lockHeld
+                    if self.readingSeen[deck.id] != reading {
+                        self.readingSeen[deck.id] = reading
+                        spindleLog.notice(String(format: "Deck %@: %@ (signal %.3f, speed %.2f, %@)", deck.label,
+                                                 reading ? "reading the record" : "not reading the record",
+                                                 t.signal, t.pitch, core.decks[deck.id].definition.id))
                     }
                     // Lock lost while playing (a lift, a skip): log it, to tune
                     // the lift detection on real records.

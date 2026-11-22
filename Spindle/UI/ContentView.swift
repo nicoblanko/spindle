@@ -446,6 +446,7 @@ private struct TopBar: View {
                     ForEach(model.decks) { deck in
                         Section("Deck \(deck.label)") {
                             ForEach(TimecodeDefinition.all) { def in
+                                if def == .seratoA { Divider() }
                                 Button { model.setVinyl(def, deck: deck) } label: {
                                     if def == deck.vinyl { Label(def.name, systemImage: "checkmark") } else { Text(def.name) }
                                 }
