@@ -147,6 +147,7 @@ final class AppModel {
     /// Lock losses already logged, per deck.
     @ObservationIgnored private var lossSeen: [Int: Int32] = [:]
     @ObservationIgnored private var readingSeen: [Int: Bool] = [:]
+    @ObservationIgnored private var lastPlayhead: [Int: Double] = [:]
     /// Stereo pair per deck (first channel, 0-based). Nil until a device is chosen.
     var routing = EngineRouting()
     private var routingDeviceID: AudioDeviceID?
@@ -438,6 +439,19 @@ final class AppModel {
 
     /// Once a deck locks, remember which decoder variant did it, so the next
     /// start has the right direction straight away.
+    /// Seconds from the record's learned start to the needle (folded as the
+    /// decoder does).
+    nonisolated static func recordSeconds(_ t: DeckTelemetry, _ def: TimecodeDefinition) -> Double {
+        let period = def.positionModulus
+        var bits = t.positionIndex - max(t.recordStart, 0)
+        if period > 0 {
+            bits %= period
+            if bits > period / 2 { bits -= period }
+            if bits < -period / 2 { bits += period }
+        }
+        return Double(bits) / def.bitRate
+    }
+
     private func rememberLocks() {
         Task { [weak self] in
             while let self, let core = self.engine, self.running {
@@ -447,6 +461,16 @@ final class AppModel {
                     if t.hasPosition, deck.preferredConfig(for: def) != Int(t.activeConfig) {
                         deck.setPreferredConfig(Int(t.activeConfig), for: def)
                     }
+                    // Where the track is against the record: log jumps (and the
+                    // first second after a load), to see needle drops at work.
+                    let last = self.lastPlayhead[deck.id]
+                    if let last, abs(t.playhead - last) > 3, let length = deck.track?.duration {
+                        spindleLog.notice(String(format: "Deck %@: track jumped %.1f s → %.1f s of %.1f s (record %.1f s from its start, start %@)",
+                                                 deck.label, last, t.playhead, length,
+                                                 Self.recordSeconds(t, core.decks[deck.id].definition),
+                                                 t.recordStart >= 0 ? "learned" : "not learned"))
+                    }
+                    self.lastPlayhead[deck.id] = t.playhead
                     // Reading the record or not: log each change, with the level.
                     let reading = t.lockHeld
                     if self.readingSeen[deck.id] != reading {
