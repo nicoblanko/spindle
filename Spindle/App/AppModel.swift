@@ -289,6 +289,15 @@ final class AppModel {
     func start() async {
         stop()
         error = nil
+        // A device that was unplugged and plugged back in gets a new number
+        // from macOS: find it again by name (else the Xone if it's there).
+        let wanted = selectedDevice?.name
+        devices = AudioDevices.all()
+        if selectedDevice == nil {
+            selectedDeviceID = devices.first(where: { $0.name == wanted })?.id
+                ?? devices.first(where: \.isXone)?.id
+                ?? AudioDevices.defaultOutput()
+        }
         spindleLog.notice("Start: device \(selectedDevice?.name ?? "none"), control \(controlMode.rawValue), vinyl \(definition.id)")
         guard let device = selectedDevice.flatMap({ AudioDevices.device($0.id) }) else {
             error = "No audio device selected."
