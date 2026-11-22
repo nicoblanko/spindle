@@ -42,6 +42,9 @@ struct SharedTrackList: View {
     var played: ((Record) -> Bool)? = nil
     var leading: ((Record) -> AnyView)? = nil
     var leadingWidth: CGFloat = 0
+    /// Mix: the pre-listen column, and the row the arrow keys moved to.
+    var listen: ((Record) -> AnyView)? = nil
+    var follow: URL? = nil
     var nameWidth: CGFloat = 300
     /// Extra controls at the right of the toolbar.
     var trailing: AnyView? = nil
@@ -69,6 +72,9 @@ struct SharedTrackList: View {
                        played: played,
                        leading: leading,
                        leadingWidth: leadingWidth,
+                       listen: listen,
+                       listenWidth: listen == nil ? 0 : ListenCell.width,
+                       follow: follow,
                        nameWidth: nameWidth)
         }
         .background(Theme.panel)

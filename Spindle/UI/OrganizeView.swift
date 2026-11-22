@@ -1237,6 +1237,7 @@ final class OrganizeKeys {
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 
     private func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
+        guard Shortcuts.shared.forPages(event) else { return false }
         // Typing in a field keeps its keys, except space in an empty field
         // and Escape, which hand the keys back.
         if let text = event.window?.firstResponder as? NSText {
@@ -1244,32 +1245,26 @@ final class OrganizeKeys {
             event.window?.makeFirstResponder(nil)
             if event.keyCode == 53 { return true }
         }
-        let flags = event.modifierFlags.intersection([.command, .control, .option])
-        guard flags.isEmpty else { return false }
+        let keys = Shortcuts.shared
+        func on(_ a: ShortcutAction) -> Bool { keys.matches(a, event) }
         let selection = model.organizeSelection
         // The row the keys act on: the one moved to last, else the first selected.
         let current = follow.flatMap { selection.contains($0) ? $0 : nil } ?? order.first(where: selection.contains)
 
-        switch event.keyCode {
-        case 18: focus = .library; return true            // 1
-        case 19: focus = .tracks; return true             // 2
-        default: break
-        }
+        if on(.organizeLibrary) { focus = .library; return true }
+        if on(.organizeTracks) { focus = .tracks; return true }
         if focus == .library, handleLibrary(event) { return true }
 
-        switch event.keyCode {
-        case 125, 126:                                    // ↓ ↑
-            guard !order.isEmpty else { return true }
-            let step = event.keyCode == 125 ? 1 : -1
-            let index = current.flatMap { order.firstIndex(of: $0) }.map { $0 + step } ?? (step > 0 ? 0 : order.count - 1)
-            let next = order[min(max(index, 0), order.count - 1)]
-            model.organizeSelection = [next]
-            follow = next
-        case 49:                                          // space
+        if on(.organizeDown) || on(.organizeUp) {
+            if let next = ListStep.next(in: order, from: current, by: on(.organizeDown) ? 1 : -1) {
+                model.organizeSelection = [next]
+                follow = next
+            }
+        } else if on(.organizePlay) {
             if let url = current { model.listen(url, at: nil) }
-        case 123, 124:                                    // ← →
-            if model.prepPage.preview != nil { model.prepSeek(by: event.keyCode == 124 ? 10 : -10) }
-        default:
+        } else if on(.organizeBack) || on(.organizeForward) {
+            if model.prepPage.preview != nil { model.prepSeek(by: on(.organizeForward) ? 10 : -10) }
+        } else {
             return false
         }
         return true
@@ -1280,24 +1275,35 @@ final class OrganizeKeys {
     private func handleLibrary(_ event: NSEvent) -> Bool {
         let items = libraryItems
         guard !items.isEmpty else { return false }
+        let keys = Shortcuts.shared
+        func on(_ a: ShortcutAction) -> Bool { keys.matches(a, event) }
         let current = items.firstIndex(where: \.selected)
-        switch event.keyCode {
-        case 125, 126:
-            let step = event.keyCode == 125 ? 1 : -1
+        if on(.organizeDown) || on(.organizeUp) {
+            let step = on(.organizeDown) ? 1 : -1
             let next = current.map { min(max($0 + step, 0), items.count - 1) } ?? 0
             items[next].activate()
             return true
-        case 36, 76:                                      // Return
+        }
+        if on(.organizeRename) {
             guard let current, let rename = items[current].rename else { return false }
             rename()
             return true
-        case 123, 124:                                    // ← →
-            guard let current, let expand = items[current].expand else { return false }
-            expand(event.keyCode == 124)
-            return true
-        default:
-            return false
         }
+        if on(.organizeBack) || on(.organizeForward) {
+            guard let current, let expand = items[current].expand else { return false }
+            expand(on(.organizeForward))
+            return true
+        }
+        return false
+    }
+}
+
+/// Moving one row up or down a list (clamped at the ends).
+enum ListStep {
+    static func next(in order: [URL], from current: URL?, by step: Int) -> URL? {
+        guard !order.isEmpty else { return nil }
+        let index = current.flatMap { order.firstIndex(of: $0) }.map { $0 + step } ?? (step > 0 ? 0 : order.count - 1)
+        return order[min(max(index, 0), order.count - 1)]
     }
 }
 

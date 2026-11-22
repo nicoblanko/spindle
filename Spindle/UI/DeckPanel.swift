@@ -87,8 +87,6 @@ struct DeckPanel: View {
                 .buttonStyle(.plain)
                 .help(showArt ? "Hide album art" : "Show album art")
             }
-            Button("Load…") { model.chooseFile(for: deck) }
-                .buttonStyle(FlatButtonStyle())
         }
         .padding(.horizontal, Theme.space3)
         .padding(.vertical, Theme.space2)

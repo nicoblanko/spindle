@@ -83,11 +83,16 @@ final class PrepKeys {
 
     deinit { remove() }
 
-    static let help = "space play · 1–9 jump to cue · ⇧1–9 set cue · Q new cue · L new loop slot · ← → bar · ⇧← → beat · ↑ ↓ track · − + zoom · D bar 1 here · [ ] nudge grid · C click · M marked"
+    static var help: String {
+        let k = Shortcuts.shared
+        func d(_ a: ShortcutAction) -> String { k.combo(a).display }
+        return "\(d(.markPlay)) play · 1–9 jump to cue · ⇧1–9 set cue · \(d(.markNewCue)) new cue · \(d(.markNewLoop)) new loop slot · \(d(.markBarBack)) \(d(.markBarForward)) bar · \(d(.markBeatBack)) \(d(.markBeatForward)) beat · \(d(.markPreviousTrack)) \(d(.markNextTrack)) track · \(d(.markZoomOut)) \(d(.markZoomIn)) zoom · \(d(.markDownbeat)) bar 1 here · \(d(.markNudgeEarlier)) \(d(.markNudgeLater)) nudge grid · \(d(.markClick)) click · \(d(.markMarked)) marked"
+    }
     /// Key codes of the number keys 1–9.
     static let numberKeys: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 
     private static func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
+        guard Shortcuts.shared.forPages(event) else { return false }
         // Typing in a field (search, notes, rename) keeps its keys, except
         // space in an empty field and Escape, which hand the keys back.
         if let text = event.window?.firstResponder as? NSText {
@@ -99,33 +104,31 @@ final class PrepKeys {
             return false
         }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) { return false }
-        let shift = flags.contains(.shift)
         let page = model.prepPage
+        let keys = Shortcuts.shared
+        func on(_ a: ShortcutAction) -> Bool { keys.matches(a, event) }
 
-        switch event.keyCode {
-        case 49: model.prepTogglePlay()
-        case 123: model.prepStep(beats: shift ? -1 : -4)
-        case 124: model.prepStep(beats: shift ? 1 : 4)
-        case 126, 125:
-            model.prepStepTrack(event.keyCode == 126 ? -1 : 1, in: model.pageRecords("prep").map(\.id))
-        case 27: page.zoomBy(2)                        // −
-        case 24: page.zoomBy(0.5)                      // = / +
-        case 33: model.prepEdit { $0.gridOffset -= 0.005 }
-        case 30: model.prepEdit { $0.gridOffset += 0.005 }
-        default:
-            if let n = numberKeys.firstIndex(of: event.keyCode) {
-                if shift { model.prepSetCue(slot: n) } else { model.prepJump(cue: n) }
-                return true
-            }
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "d": model.prepDownbeatHere()
-            case "c": model.prepSetMetronome(!page.metronome)
-            case "m": model.prepEdit { $0.mixReady.toggle() }
-            case "q": model.prepAddCue()
-            case "l": model.prepAddLoop()
-            default: return false
-            }
+        if on(.markPlay) { model.prepTogglePlay() }
+        else if on(.markBarBack) { model.prepStep(beats: -4) }
+        else if on(.markBarForward) { model.prepStep(beats: 4) }
+        else if on(.markBeatBack) { model.prepStep(beats: -1) }
+        else if on(.markBeatForward) { model.prepStep(beats: 1) }
+        else if on(.markPreviousTrack) { model.prepStepTrack(-1, in: model.pageRecords("prep").map(\.id)) }
+        else if on(.markNextTrack) { model.prepStepTrack(1, in: model.pageRecords("prep").map(\.id)) }
+        else if on(.markZoomOut) { page.zoomBy(2) }
+        else if on(.markZoomIn) { page.zoomBy(0.5) }
+        else if on(.markNudgeEarlier) { model.prepEdit { $0.gridOffset -= 0.005 } }
+        else if on(.markNudgeLater) { model.prepEdit { $0.gridOffset += 0.005 } }
+        else if on(.markDownbeat) { model.prepDownbeatHere() }
+        else if on(.markClick) { model.prepSetMetronome(!page.metronome) }
+        else if on(.markMarked) { model.prepEdit { $0.mixReady.toggle() } }
+        else if on(.markNewCue) { model.prepAddCue() }
+        else if on(.markNewLoop) { model.prepAddLoop() }
+        else if flags.subtracting(.shift).isEmpty, let n = numberKeys.firstIndex(of: event.keyCode) {
+            // 1–9 jump to a cue, ⇧1–9 set one (fixed keys).
+            if flags.contains(.shift) { model.prepSetCue(slot: n) } else { model.prepJump(cue: n) }
+        } else {
+            return false
         }
         return true
     }

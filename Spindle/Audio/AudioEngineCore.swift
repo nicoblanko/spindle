@@ -97,7 +97,10 @@ nonisolated final class AudioEngineCore: @unchecked Sendable {
         for deck in decks { deck.internalMode = laptop }
         preview = DeckEngine(definition: definition, sampleRate: sampleRate)
         preview.internalMode = true
-        previewOutput = !laptop && device.outputChannels >= 6 ? 4 : 0
+        // Pre-listen on the third stereo pair when there is one: on the
+        // Xone:24C (USB mode 1) that's the AUX/USB channel, so its CUE button
+        // puts it in the headphones without it reaching the master.
+        previewOutput = device.outputChannels >= 6 ? 4 : 0
 
         inputList = AudioBufferList.allocate(maximumBuffers: max(inputChannels, 1))
         var data: [UnsafeMutablePointer<Float>] = []

@@ -18,5 +18,21 @@ struct SpindleApp: App {
         WindowGroup {
             ContentView(model: model)
         }
+        .commands {
+            CommandGroup(after: .appSettings) { ShortcutsMenuItem() }
+        }
+        Window(Shortcuts.windowTitle, id: "shortcuts") {
+            ShortcutsView()
+        }
+        .defaultSize(width: 500, height: 640)
+    }
+}
+
+/// Spindle ▸ Keyboard Shortcuts… (⌘/).
+private struct ShortcutsMenuItem: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Keyboard Shortcuts…") { openWindow(id: "shortcuts") }
+            .keyboardShortcut("/", modifiers: .command)
     }
 }

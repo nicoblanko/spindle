@@ -35,7 +35,7 @@ struct MixView: View {
                 keys.install(model)
                 DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
             }
-            .onDisappear { keys.remove() }
+            .onDisappear { keys.remove(); model.prepSetPlaying(false) }
     }
 
     private var page: some View {
@@ -50,6 +50,8 @@ struct MixView: View {
                                     played: { model.playedURLs.contains($0.id) },
                                     leading: { AnyView(RowControls(model: model, url: $0.id)) },
                                     leadingWidth: 78,
+                                    listen: { AnyView(ListenCell(model: model, url: $0.track.url)) },
+                                    follow: keys.follow,
                                     trailing: AnyView(HStack(spacing: Theme.space2) {
                                         if !model.playedURLs.isEmpty {
                                             Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(Theme.inkMuted)
@@ -278,9 +280,16 @@ enum PrepEditorClock {
 
 
 /// Mix's keys: space plays or stops the deck under the mouse.
+/// Mix's keys (all changeable in Keyboard shortcuts): the track list's
+/// arrows, pre-listen (to the headphones: outputs 5–6, the Xone:24C's
+/// AUX/USB channel) and loading on deck A or B. Over a deck, the pre-listen
+/// key plays or stops that deck instead.
+@Observable
 final class MixKeys {
-    var hovered: Int?
-    private var monitor: Any?
+    @ObservationIgnored var hovered: Int?
+    /// The row to keep in view (moved to with the arrow keys).
+    var follow: URL?
+    @ObservationIgnored private var monitor: Any?
 
     func install(_ model: AppModel) {
         remove()
@@ -297,12 +306,50 @@ final class MixKeys {
 
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 
+    /// The list in the order shown (groups opened out).
+    private func order(_ model: AppModel) -> [URL] {
+        let view = model.pageView("mix")
+        let recs = model.pageRecords("mix")
+        return (view.groupBy.map { by in
+            model.records.group(recs, by: by).filter { !view.collapsed.contains($0.id) }.flatMap(\.records)
+        } ?? recs).map(\.id)
+    }
+
     private func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
-        guard event.keyCode == 49, let id = hovered, model.decks.indices.contains(id),
-              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-              !(event.window?.firstResponder is NSText) else { return false }
-        let deck = model.decks[id]
-        model.setPlaying(!deck.transportPlaying, deck: deck)
+        guard Shortcuts.shared.forPages(event) else { return false }
+        if let text = event.window?.firstResponder as? NSText {
+            guard event.keyCode == 53 || (event.keyCode == 49 && text.string.isEmpty) else { return false }
+            event.window?.makeFirstResponder(nil)
+            if event.keyCode == 53 { return true }
+        }
+        let keys = Shortcuts.shared
+        func on(_ a: ShortcutAction) -> Bool { keys.matches(a, event) }
+
+        if on(.mixListen), let id = hovered, model.decks.indices.contains(id) {
+            let deck = model.decks[id]
+            model.setPlaying(!deck.transportPlaying, deck: deck)
+            return true
+        }
+        let selection = model.mixSelection
+        let list = order(model)
+        let current = follow.flatMap { selection.contains($0) ? $0 : nil } ?? list.first(where: selection.contains)
+
+        if on(.mixDown) || on(.mixUp) {
+            if let next = ListStep.next(in: list, from: current, by: on(.mixDown) ? 1 : -1) {
+                model.mixSelection = [next]
+                follow = next
+            }
+        } else if on(.mixListen) {
+            if let url = current { model.listen(url, at: nil) }
+        } else if on(.mixBack) || on(.mixForward) {
+            if model.prepPage.preview != nil { model.prepSeek(by: on(.mixForward) ? 10 : -10) }
+        } else if on(.mixLoadA) || on(.mixLoadB) {
+            guard let url = current else { return true }
+            let deck = model.decks[on(.mixLoadA) ? 0 : 1]
+            Task { await model.load(url: url, into: deck) }
+        } else {
+            return false
+        }
         return true
     }
 }

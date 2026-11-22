@@ -402,6 +402,7 @@ extension ContentView {
 
 private struct TopBar: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: Theme.space2) {
@@ -466,6 +467,7 @@ private struct TopBar: View {
 
             divider
 
+            TopIcon(icon: "keyboard", help: "Keyboard shortcuts (⌘/)") { openWindow(id: "shortcuts") }
             TopIcon(icon: "pianokeys", help: "MIDI mapping (MIDI learn)") { model.showingMIDI = true }
             ColorPanelButton(look: LookSettings.shared)
         }
@@ -596,12 +598,13 @@ final class PageKeys {
     func install(_ model: AppModel) {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
-            guard let model, event.keyCode == 48,
-                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-                  !(event.window?.firstResponder is NSText) else { return event }
+            guard let model, Shortcuts.shared.forPages(event), !(event.window?.firstResponder is NSText) else { return event }
+            let keys = Shortcuts.shared
+            let next = keys.matches(.nextPage, event), previous = keys.matches(.previousPage, event)
+            guard next || previous else { return event }
             let pages = AppModel.Page.allCases
             let i = pages.firstIndex(of: model.page) ?? 0
-            let step = event.modifierFlags.contains(.shift) ? -1 : 1
+            let step = previous ? -1 : 1
             model.page = pages[(i + step + pages.count) % pages.count]
             return nil
         }
