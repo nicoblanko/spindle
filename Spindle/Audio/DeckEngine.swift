@@ -670,15 +670,32 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         guard decoder.hasPosition, decoder.validBits >= confirmBits else { return }
         let period = definition.positionModulus
         let index = period > 0 ? ((decoder.positionIndex % period) + period) % period : decoder.positionIndex
-        let side = definition.sideStarts.last { $0 <= index } ?? definition.sideStarts[0]
-        guard !startKnown || side != startIndex else { return }
-        if startKnown {
-            // Keep the track's position: shift the offset by the change.
-            trackOffset -= Double(side - startIndex) / definition.bitRate
+        // On MK2 the code runs straight on from one side into the next, and
+        // a needle on a side's edge reads a few seconds before its first
+        // groove. So a side counts from 30 s before its start, and once a
+        // side is found it only changes when the needle is clearly (60 s)
+        // past that point: no flipping at the edge.
+        let early = Int(30 * definition.bitRate), clear = Int(60 * definition.bitRate)
+        func side(_ margin: Int) -> Int {
+            definition.sideStarts.last { index >= $0 - margin } ?? definition.sideStarts[0]
         }
-        startIndex = side
+        var found = side(early)
+        if startKnown && found != startIndex {
+            // Moving up needs the needle well into the new side; moving down,
+            // well before the current side's edge.
+            if found > startIndex { if index < found - early + clear { found = startIndex } }
+            else if index >= startIndex - early - clear { found = startIndex }
+        }
+        guard !startKnown || found != startIndex else { return }
+        if startKnown {
+            // A side change mid-track (the record flipped): the track carries
+            // on where it is; the next load maps it from the new side's edge.
+            trackOffset -= Double(found - startIndex) / definition.bitRate
+        }
+        startIndex = found
         startKnown = true
     }
+
 
     @inline(__always)
     private static func hermite(_ data: UnsafeMutablePointer<Float>, _ count: Int, _ x: Double) -> Float {
@@ -936,7 +953,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
             let deck = DeckEngine(definition: def, sampleRate: rate)
             let track = makeTrack()
             _ = deck.exchangeTrack(track)
-            let sim = TimecodeSimulator(definition: def, startSeconds: 921.5)
+            let sim = TimecodeSimulator(definition: def, startSeconds: 913)   // just before side 2's first groove
             sim.targetPitch = 1
             var t = 0.0
             var marks: [String] = []
