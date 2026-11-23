@@ -212,6 +212,18 @@ struct MIDIMappingView: View {
                 Spacer()
                 Text(midi.sources.isEmpty ? "No MIDI devices found" : midi.sources.joined(separator: ", "))
                     .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                    .lineLimit(1).truncationMode(.tail)
+                Toggle("Log MIDI", isOn: $midi.logAll)
+                    .toggleStyle(.checkbox)
+                    .font(Theme.caption)
+                    .help("Writes every message from your controllers to the log, so a mapping can be made from what they send.")
+                Button("Show log") {
+                    let log = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("Logs/spindle.log")
+                    NSWorkspace.shared.activateFileViewerSelecting([log])
+                }
+                .buttonStyle(FlatButtonStyle())
+                .help("Shows spindle.log in Finder, to send it on.")
                 Button("Done") { midi.learning = nil; dismiss() }.buttonStyle(FlatButtonStyle(primary: true))
             }
             .padding(Theme.space3)

@@ -10,8 +10,9 @@
 //  and the browse knob are relative (they send steps, not a position), and
 //  jog touch and CUE also act on release.
 //
-//  SPINDLE_MIDILOG=1 writes every incoming message to the log, to map a
-//  controller from what it really sends.
+//  "Log MIDI" in MIDI mapping (or SPINDLE_MIDILOG=1) writes every incoming
+//  message to ~/Library/Logs/spindle.log, to map a controller from what it
+//  really sends.
 //
 
 import CoreMIDI
@@ -177,7 +178,14 @@ final class MIDIController {
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: Self.storeKey) }
     }
 
-    private static let logAll = ProcessInfo.processInfo.environment["SPINDLE_MIDILOG"] != nil
+    /// Every incoming message goes to the log (MIDI mapping's "Log MIDI").
+    var logAll = ProcessInfo.processInfo.environment["SPINDLE_MIDILOG"] != nil
+        || UserDefaults.standard.bool(forKey: "midi.log") {
+        didSet {
+            UserDefaults.standard.set(logAll, forKey: "midi.log")
+            if logAll { spindleLog.notice("MIDI log on · sources: \(sources.joined(separator: ", "))") }
+        }
+    }
 
     /// A relative encoder step: centred on 64 (Pioneer/AlphaTheta jogs:
     /// 65 = +1, 63 = −1) or two's complement (1 = +1, 127 = −1).
@@ -190,7 +198,7 @@ final class MIDIController {
     private func receive(status: UInt8, data1: UInt8, data2: UInt8) {
         let kind = status & 0xf0
         let channel = Int(status & 0x0f)
-        if Self.logAll { spindleLog.notice(String(format: "MIDI %02X %02X %02X", status, data1, data2)) }
+        if logAll { spindleLog.notice(String(format: "MIDI %02X %02X %02X", status, data1, data2)) }
         let control: MIDIControl
         var pressed = false
         var value = Double(data2) / 127
