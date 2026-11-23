@@ -248,9 +248,24 @@ struct MIDIMappingView: View {
                     }
                 }
             }
-            Text("Last message: \(midi.lastMessage.isEmpty ? "none" : midi.lastMessage)")
-                .font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
-                .padding(Theme.space3)
+            HStack(spacing: Theme.space2) {
+                Text("Last message: \(midi.lastMessage.isEmpty ? "none" : midi.lastMessage)")
+                    .font(Theme.readoutSm).foregroundStyle(Theme.inkFaint)
+                Spacer()
+                if midi.calibratingJog {
+                    Text("Turn a mapped jog wheel exactly once… \(abs(midi.calibrationSteps)) steps")
+                        .font(Theme.caption).foregroundStyle(Theme.accent)
+                    Button("Done") { midi.finishJogCalibration() }
+                        .buttonStyle(FlatButtonStyle(primary: true))
+                } else {
+                    Text("Jog: \(Int(midi.jogStepsPerTurn)) steps per turn")
+                        .font(Theme.caption).foregroundStyle(Theme.inkMuted)
+                    Button("Calibrate") { midi.startJogCalibration() }
+                        .buttonStyle(FlatButtonStyle())
+                        .help("Mark the jog wheel, click, turn it exactly one full turn, then click Done: a turn then scratches as far as a turn of a record.")
+                }
+            }
+            .padding(Theme.space3)
         }
         .frame(width: 620, height: 600)
         .background(Theme.panel)

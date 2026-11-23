@@ -444,6 +444,7 @@ extension AppModel {
         midi.handler = { [weak self] target, value in
             guard let self else { return }
             guard let id = target.deck else {
+                if target.action == .browse { self.browseHandler?(Int(value)) }
                 if target.action == .record { self.toggleRecording() }
                 if target.action == .crossfader { self.setCrossfader(abs(value) < 0.03 ? 0 : value) }
                 return
@@ -460,9 +461,21 @@ extension AppModel {
             case .filter: self.setFilter(abs(value) < 0.03 ? 0 : value, deck: deck, fromMIDI: true)
             case .echo: self.setEcho(value, deck: deck, fromMIDI: true)
             case .loadSelected:
-                if let url = self.highlightedClip { Task { await self.load(url: url, into: deck) } }
-            case .play: self.setPlaying(!deck.transportPlaying, deck: deck)
-            case .cueButton: self.cue(deck: deck)
+                // The track highlighted in the Mix list (browse knob, arrow
+                // keys), else the highlighted clip.
+                let listed = self.mixSelection.count == 1 ? self.mixSelection.first : nil
+                if let url = listed ?? self.highlightedClip { Task { await self.load(url: url, into: deck) } }
+            case .play:
+                if deck.cuePreview {
+                    deck.cuePreview = false          // PLAY while holding CUE: keep playing
+                } else {
+                    self.setPlaying(!deck.transportPlaying, deck: deck)
+                }
+            case .cueButton: self.cueButton(pressed: value > 0.5, deck: deck)
+            case .jogTouch: self.jogTouch(value > 0.5, deck: deck)
+            case .jogTurn: self.jog(Int(value), deck: deck, ring: false)
+            case .jogRing: self.jog(Int(value), deck: deck, ring: true)
+            case .browse: break
             case .sync: self.sync(deck: deck)
             case .tempo: self.setTempo((abs(value) < 0.02 ? 0 : value) * deck.tempoRange, deck: deck)
             case .volume: self.setVolume(value, deck: deck)
@@ -481,9 +494,63 @@ extension AppModel {
 
     /// Back to the IN cue (or the start) and stop, like a CDJ's cue button.
     func cue(deck: DeckModel) {
+        deck.cuePreview = false
         setPlaying(false, deck: deck)
-        let start = deck.track.flatMap { t in prep.prep(for: t.url).flatMap { $0.cue(.intro) ?? $0.cues.first }?.time } ?? 0
-        engine?.decks[deck.id].jumpRequest = start
+        engine?.decks[deck.id].jumpRequest = cuePoint(deck)
+    }
+
+    /// The IN cue, else the first cue, else the start.
+    func cuePoint(_ deck: DeckModel) -> Double {
+        deck.track.flatMap { t in prep.prep(for: t.url).flatMap { $0.cue(.intro) ?? $0.cues.first }?.time } ?? 0
+    }
+
+    /// A controller's CUE, as on a CDJ: playing → back to the cue and stop;
+    /// stopped at the cue → plays while held and goes back on release
+    /// (press PLAY while holding to keep playing); stopped elsewhere →
+    /// back to the cue.
+    func cueButton(pressed: Bool, deck: DeckModel) {
+        guard deck.track != nil, let e = engine?.decks[deck.id] else { return }
+        if pressed {
+            let atCue = abs(e.telemetry.pointee.playhead - cuePoint(deck)) < 0.05
+            if !deck.transportPlaying && atCue {
+                setPlaying(true, deck: deck)
+                deck.cuePreview = true
+            } else {
+                cue(deck: deck)
+            }
+        } else if deck.cuePreview {
+            cue(deck: deck)
+        }
+    }
+
+    // MARK: Jog wheels (controllers, laptop mode)
+
+    /// One turn of a jog wheel moves the track as far as one turn of a
+    /// record at 33⅓: 1.8 s.
+    static let secondsPerTurn = 60 / (100.0 / 3)
+
+    /// Steps a controller's jog wheel sends per turn (set per controller;
+    /// AlphaTheta/Pioneer jogs are often several hundred).
+    var jogStepsPerTurn: Double { midi.jogStepsPerTurn }
+
+    /// Touching the jog's top holds the track, like a hand on a record.
+    func jogTouch(_ on: Bool, deck: DeckModel) {
+        deck.jogTouched = on
+        engine?.decks[deck.id].jogHold = on
+    }
+
+    /// Touched: scratch (the track follows the wheel). Not touched (or the
+    /// outer ring): bend the tempo while playing, search while stopped.
+    func jog(_ steps: Int, deck: DeckModel, ring: Bool) {
+        guard deck.track != nil, let e = engine?.decks[deck.id], e.internalMode else { return }
+        let seconds = Double(steps) / jogStepsPerTurn * Self.secondsPerTurn
+        if deck.jogTouched && !ring {
+            e.nudgeTotal += seconds
+        } else if deck.transportPlaying {
+            e.nudgeTotal += seconds * 0.1
+        } else {
+            seek(deck: deck, by: seconds)
+        }
     }
 
     func setTempo(_ value: Double, deck: DeckModel) {

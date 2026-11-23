@@ -33,9 +33,12 @@ struct MixView: View {
         page
             .onAppear {
                 keys.install(model)
+                model.browseHandler = { [weak keys, weak model] steps in
+                    if let keys, let model { keys.browse(steps, model) }
+                }
                 DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
             }
-            .onDisappear { keys.remove(); model.prepSetPlaying(false) }
+            .onDisappear { keys.remove(); model.browseHandler = nil; model.prepSetPlaying(false) }
     }
 
     private var page: some View {
@@ -315,6 +318,20 @@ final class MixKeys {
         } ?? recs).map(\.id)
     }
 
+    private func current(_ model: AppModel, _ list: [URL]) -> URL? {
+        let selection = model.mixSelection
+        return follow.flatMap { selection.contains($0) ? $0 : nil } ?? list.first(where: selection.contains)
+    }
+
+    /// A controller's browse knob: moves the highlight like the arrow keys.
+    func browse(_ steps: Int, _ model: AppModel) {
+        let list = order(model)
+        if let next = ListStep.next(in: list, from: current(model, list), by: steps) {
+            model.mixSelection = [next]
+            follow = next
+        }
+    }
+
     private func handle(_ event: NSEvent, _ model: AppModel) -> Bool {
         guard Shortcuts.shared.forPages(event) else { return false }
         if let text = event.window?.firstResponder as? NSText {
@@ -330,9 +347,8 @@ final class MixKeys {
             model.setPlaying(!deck.transportPlaying, deck: deck)
             return true
         }
-        let selection = model.mixSelection
         let list = order(model)
-        let current = follow.flatMap { selection.contains($0) ? $0 : nil } ?? list.first(where: selection.contains)
+        let current = current(model, list)
 
         if on(.mixDown) || on(.mixUp) {
             if let next = ListStep.next(in: list, from: current, by: on(.mixDown) ? 1 : -1) {

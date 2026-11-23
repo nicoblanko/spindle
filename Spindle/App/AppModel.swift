@@ -43,6 +43,10 @@ final class DeckModel: Identifiable {
     var echo: Double { get { fx.echo } set { fx.echo = newValue } }
     // Laptop mode transport.
     var transportPlaying = false
+    /// A controller's jog wheel is touched (holds the track; turning scratches).
+    var jogTouched = false
+    /// A controller's CUE is held at the cue point (plays until released).
+    var cuePreview = false
     /// Tempo change in laptop mode: 0.05 = +5%.
     var tempo: Double = 0
     /// ± range of the tempo slider.
@@ -210,6 +214,9 @@ final class AppModel {
     var preparing = 0
     /// The clip selected in the Mix grid (MIDI "load highlighted clip").
     var highlightedClip: URL?
+    /// Moves the Mix list highlight by a number of rows (a controller's
+    /// browse knob); set by the Mix page.
+    @ObservationIgnored var browseHandler: ((Int) -> Void)?
     /// The set open in Organize's right panel (its tracks are greyed in the list).
     var openSet: UUID? = UserDefaults.standard.string(forKey: "organize.openSet").flatMap(UUID.init) {
         didSet { UserDefaults.standard.set(openSet?.uuidString, forKey: "organize.openSet") }

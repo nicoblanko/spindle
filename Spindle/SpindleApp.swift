@@ -21,7 +21,7 @@ struct SpindleApp: App {
             exit(0)
         }
         if env["SPINDLE_SELFTEST"] != nil {
-            print(DeckEngine.scrubTest()); print(DeckEngine.loopTest()); print(DeckEngine.needleTest())
+            print(DeckEngine.scrubTest()); print(DeckEngine.loopTest()); print(DeckEngine.jogTest()); print(DeckEngine.needleTest())
             exit(0)
         }
     }

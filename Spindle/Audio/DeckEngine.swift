@@ -131,6 +131,9 @@ nonisolated final class DeckEngine: @unchecked Sendable {
     /// The deck is driven by its own transport instead of a record.
     var internalMode = false
     var transportPlaying = false
+    /// A controller's jog wheel is touched: the track stands (and moves only
+    /// as the wheel is turned, through the nudge).
+    var jogHold = false
     /// Playback speed in laptop mode (1 = the track's own tempo).
     var tempo: Double = 1
     /// Channel level (laptop mode's built-in mixer: volume × crossfader).
@@ -353,7 +356,7 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         var position = 0.0
         var absolute = false
         if internalMode {
-            target = transportPlaying ? tempo : 0
+            target = transportPlaying && !jogHold ? tempo : 0
         } else {
             target = followSpeed(decoder, frames: frames)
             // Needle off = almost no signal (a spinning record still gives
@@ -1136,6 +1139,47 @@ nonisolated final class DeckEngine: @unchecked Sendable {
         for t in tracks { t.pointee.free(); t.deallocate() }
         return String(format: "Replay %@: %.1f s, %d jumps → %@", (path as NSString).lastPathComponent,
                       Double(total) / rate, deck.jumpCount, out)
+    }
+
+    /// Self-test for controller jog wheels (laptop mode): a playing deck,
+    /// the jog touched (should stand), turned back and forth by ¼ turn
+    /// (track follows: −0.45 s then back, with sound), released (plays on).
+    static func jogTest() -> String {
+        let rate = 48000.0, frames = Int(rate * 20)
+        let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        for i in 0..<frames { let v = Float(0.5 * sin(2 * .pi * 440 * Double(i) / rate)); l[i] = v; r[i] = v }
+        let samples = UnsafeMutablePointer<TrackSamples>.allocate(capacity: 1)
+        samples.initialize(to: TrackSamples(left: l, right: r, frames: frames, sampleRate: rate))
+        let deck = DeckEngine(definition: .traktorMK2, sampleRate: rate)
+        deck.internalMode = true
+        _ = deck.exchangeTrack(samples)
+        deck.jumpRequest = 5
+        deck.transportPlaying = true
+        let outL = UnsafeMutablePointer<Float>.allocate(capacity: 128), outR = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+        defer { outL.deallocate(); outR.deallocate(); samples.pointee.free(); samples.deallocate() }
+        var loud: Float = 0
+        func run(_ seconds: Double) { for _ in 0..<Int(seconds * rate / 128) { deck.render(left: outL, right: outR, frames: 128, mix: false); for i in 0..<128 { loud = max(loud, abs(outL[i])) } } }
+        func at() -> Double { deck.telemetry.pointee.playhead }
+        run(1)
+        let p0 = at()
+        deck.jogHold = true; run(0.5)
+        let held = at() - p0
+        let quarter = 0.25 * 1.8
+        // Back a quarter turn in 30 steps over 0.3 s, then forward again.
+        loud = 0
+        for _ in 0..<30 { deck.nudgeTotal -= quarter / 30; run(0.01) }
+        run(0.1)
+        let back = at() - p0
+        let scratchLoud = loud
+        for _ in 0..<30 { deck.nudgeTotal += quarter / 30; run(0.01) }
+        run(0.1)
+        let forth = at() - p0
+        deck.jogHold = false
+        let p1 = at(); run(1)
+        let after = at() - p1
+        return String(format: "Jog test: held %.3f s (should be ~0), scratch back %+.2f s then %+.2f s (−0.45 then ~0), sound while scratching %.2f, after release played %.2f s in 1 s · steps 65→%d 63→%d 1→%d 127→%d 64→%d",
+                      held, back, forth, scratchLoud, after,
+                      MIDIController.steps(65), MIDIController.steps(63), MIDIController.steps(1), MIDIController.steps(127), MIDIController.steps(64))
     }
 
     static func loopTest() -> String {

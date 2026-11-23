@@ -2,11 +2,16 @@
 //  MIDIController.swift
 //  Spindle
 //
-//  MIDI learn for controllers such as the Akai MPK mini: pick an action,
-//  press a pad or turn a knob, and it is mapped. Pads (notes or CC presses)
-//  trigger; knobs set a value. The MPK mini's knobs are absolute, so a knob
-//  only takes over a value once it reaches it (soft takeover); until then
-//  the mapping shows how far off it is.
+//  MIDI learn for controllers such as the Akai MPK mini or a DJ controller
+//  (AlphaTheta Omnis-Duo): pick an action, press a pad or turn a knob, and
+//  it is mapped. Pads (notes or CC presses) trigger; knobs set a value.
+//  Absolute knobs only take over a value once they reach it (soft
+//  takeover); until then the mapping shows how far off it is. Jog wheels
+//  and the browse knob are relative (they send steps, not a position), and
+//  jog touch and CUE also act on release.
+//
+//  SPINDLE_MIDILOG=1 writes every incoming message to the log, to map a
+//  controller from what it really sends.
 //
 
 import CoreMIDI
@@ -17,16 +22,21 @@ nonisolated enum MIDIAction: String, Codable, Sendable, CaseIterable {
     case play, cueButton, sync, tempo, volume
     case cue1, cue2, cue3, cue4, loop, loopHalve, loopDouble, filter, echo, loadSelected
     case record, crossfader
+    case jogTouch, jogTurn, jogRing, browse
 
     var isContinuous: Bool { [.filter, .echo, .tempo, .volume, .crossfader].contains(self) }
     /// Knobs whose range is −1…1 (centre = off).
     var bipolar: Bool { [.filter, .tempo, .crossfader].contains(self) }
-    var perDeck: Bool { self != .record && self != .crossfader }
+    /// Send steps (relative encoders): the handler gets the step count.
+    var isRelative: Bool { [.jogTurn, .jogRing, .browse].contains(self) }
+    /// Act on press (1) and on release (0).
+    var isMomentary: Bool { [.jogTouch, .cueButton].contains(self) }
+    var perDeck: Bool { ![.record, .crossfader, .browse].contains(self) }
 
     var name: String {
         switch self {
         case .play: "Play/pause (laptop)"
-        case .cueButton: "CUE (laptop)"
+        case .cueButton: "CUE (laptop; hold at the cue to preview)"
         case .sync: "Sync (laptop)"
         case .tempo: "Tempo (laptop)"
         case .volume: "Volume (laptop)"
@@ -42,6 +52,10 @@ nonisolated enum MIDIAction: String, Codable, Sendable, CaseIterable {
         case .echo: "Echo"
         case .loadSelected: "Load highlighted clip"
         case .record: "Record on/off"
+        case .jogTouch: "Jog touch (hold to scratch)"
+        case .jogTurn: "Jog turn (scratch when touched)"
+        case .jogRing: "Jog outer ring (bend / search)"
+        case .browse: "Browse knob (Mix list)"
         }
     }
 }
@@ -58,6 +72,7 @@ nonisolated struct MIDITarget: Codable, Sendable, Hashable, Identifiable {
             for action in MIDIAction.allCases where action.perDeck { list.append(MIDITarget(deck: deck, action: action)) }
         }
         list.append(MIDITarget(deck: nil, action: .crossfader))
+        list.append(MIDITarget(deck: nil, action: .browse))
         list.append(MIDITarget(deck: nil, action: .record))
         return list
     }
@@ -82,6 +97,23 @@ final class MIDIController {
     private(set) var pickup: [MIDITarget: Double] = [:]
     /// Called on the main actor for mapped controls: target and value 0…1.
     var handler: ((MIDITarget, Double) -> Void)?
+    /// Jog calibration: while on, jog steps are counted instead of moving
+    /// the track (turn the wheel exactly once, then finish).
+    private(set) var calibratingJog = false
+    private(set) var calibrationSteps = 0
+    /// Steps per turn of the jog wheels (shared with AppModel.jogStepsPerTurn).
+    var jogStepsPerTurn: Double {
+        get { UserDefaults.standard.object(forKey: "jog.stepsPerTurn") as? Double ?? 720 }
+        set { UserDefaults.standard.set(min(max(newValue, 32), 8192), forKey: "jog.stepsPerTurn") }
+    }
+
+    func startJogCalibration() { calibrationSteps = 0; calibratingJog = true }
+
+    func finishJogCalibration() {
+        calibratingJog = false
+        if abs(calibrationSteps) >= 32 { jogStepsPerTurn = Double(abs(calibrationSteps)) }
+    }
+
     /// Current value of a continuous target (0…1), for soft takeover.
     var currentValue: ((MIDITarget) -> Double)?
 
@@ -145,17 +177,27 @@ final class MIDIController {
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: Self.storeKey) }
     }
 
+    private static let logAll = ProcessInfo.processInfo.environment["SPINDLE_MIDILOG"] != nil
+
+    /// A relative encoder step: centred on 64 (Pioneer/AlphaTheta jogs:
+    /// 65 = +1, 63 = −1) or two's complement (1 = +1, 127 = −1).
+    nonisolated static func steps(_ value: UInt8) -> Int {
+        let v = Int(value)
+        if abs(v - 64) < 32 { return v - 64 }
+        return v < 64 ? v : v - 128
+    }
+
     private func receive(status: UInt8, data1: UInt8, data2: UInt8) {
         let kind = status & 0xf0
         let channel = Int(status & 0x0f)
+        if Self.logAll { spindleLog.notice(String(format: "MIDI %02X %02X %02X", status, data1, data2)) }
         let control: MIDIControl
         var pressed = false
         var value = Double(data2) / 127
         switch kind {
-        case 0x90 where data2 > 0:
-            control = MIDIControl(isNote: true, channel: channel, number: Int(data1)); pressed = true
         case 0x80, 0x90:
-            return                                                  // note off
+            control = MIDIControl(isNote: true, channel: channel, number: Int(data1))
+            pressed = kind == 0x90 && data2 > 0
         case 0xb0:
             control = MIDIControl(isNote: false, channel: channel, number: Int(data1)); pressed = data2 > 63
         default:
@@ -164,8 +206,10 @@ final class MIDIController {
         lastMessage = control.label + " = \(data2)"
 
         if let target = learning {
+            // Learn on a press or a turn, never on a release.
+            if control.isNote && !pressed { return }
             // A knob for a knob target, anything for a button target.
-            if target.action.isContinuous && control.isNote { return }
+            if (target.action.isContinuous || target.action.isRelative) && control.isNote { return }
             for (t, c) in bindings where c == control { bindings[t] = nil }
             bindings[target] = control
             engaged.remove(target)
@@ -175,6 +219,19 @@ final class MIDIController {
         }
 
         for (target, bound) in bindings where bound == control {
+            if target.action.isRelative {
+                let steps = Self.steps(data2)
+                if calibratingJog && target.action != .browse {
+                    calibrationSteps += steps
+                    continue
+                }
+                if steps != 0 { handler?(target, Double(steps)) }
+                continue
+            }
+            if target.action.isMomentary {
+                handler?(target, pressed ? 1 : 0)
+                continue
+            }
             if target.action.isContinuous {
                 if target.action.bipolar { value = value * 2 - 1 }
                 let current = currentValue?(target) ?? value
