@@ -2,6 +2,8 @@
 
 **How to use it:** see the [manual](MANUAL.md).
 
+![The Mix page: the track list above two decks](docs/images/mix.png)
+
 A native macOS DJ app controlled by Traktor Scratch timecode vinyl: Traktor's
 decks combined with Ableton's clip launcher, laid out in pages like DaVinci
 Resolve (Organize, Prep, Mix, Sessions).
@@ -44,6 +46,16 @@ All four pages work:
   waveform to move through a track; pinch or ⌘-scroll to zoom.
 - **MIDI learn** for controllers such as the Akai MPK mini, with soft
   takeover for absolute knobs.
+
+## Screenshots
+
+**Organize:** the library, tags, tempo groups and an Airtable-style track grid.
+
+![The Organize page](docs/images/organize.png)
+
+**Mark:** beatgrid, cues and loop slots on a zoomable waveform.
+
+![The Mark page](docs/images/mark.png)
 
 ## Building
 

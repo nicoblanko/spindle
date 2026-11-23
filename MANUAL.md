@@ -53,6 +53,8 @@ Switch pages with the page bar at the bottom, or **Tab** / **⇧Tab**.
 The library on the left, the track list in the middle, and the set builder
 or inspector on the right.
 
+![The Organize page](docs/images/organize.png)
+
 ### Library (left)
 - **Smart lists:** Marked, Tagged, In a set, Coloured.
 - **Folders**, **sets** (playlists, in folders if you like; deleted ones
@@ -87,6 +89,8 @@ A grid like Airtable:
   status, with **Open in Mark →**.
 
 ### Quick cards (every page)
+![The colour card (⇧C)](docs/images/colour-card.png)
+
 - **⇧C** colour the selected tracks: ← → pick, 0–9 jump, Return applies.
 - **⇧S** put the selected tracks in a set: type to find a set or name a
   new one, ↑ ↓ pick, Return adds (or takes them out again if they're all in
@@ -98,6 +102,8 @@ A grid like Airtable:
 
 Prepare a track for playing: beatgrid, cues and loop slots. Nothing is
 placed automatically except a suggested grid.
+
+![The Mark page](docs/images/mark.png)
 
 - **Beatgrid:** tempo and downbeat are detected; *Detect again* redoes it
   (your cues and loops stay). Fine-tune with ±0.01 BPM, ×2 / ÷2, and nudge
@@ -119,6 +125,8 @@ placed automatically except a suggested grid.
 
 The track list at the top (same library and views as Organize, with its own
 columns) and the two decks below.
+
+![The Mix page](docs/images/mix.png)
 
 ### Track list
 - **Dim what doesn't fit:** greys out tracks whose key or tempo doesn't fit
