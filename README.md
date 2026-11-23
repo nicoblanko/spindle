@@ -1,5 +1,7 @@
 # Spindle
 
+**How to use it:** see the [manual](MANUAL.md).
+
 A native macOS DJ app controlled by Traktor Scratch timecode vinyl: Traktor's
 decks combined with Ableton's clip launcher, laid out in pages like DaVinci
 Resolve (Organize, Prep, Mix, Sessions).
@@ -9,7 +11,7 @@ Resolve (Organize, Prep, Mix, Sessions).
 All four pages work:
 
 - **Organize:** sort the library and build sets. Sidebar: All tracks and
-  smart lists (Not prepped, Untagged, In no set), folders, sets (with
+  smart lists (Marked, Tagged, In a set, Coloured), folders, sets (with
   Recently deleted), tags and tempo groups. The track list is an
   Airtable-style grid (your own fields, filter, group, sort, saved views).
   On the right, the set builder for the open set (running time, energy
